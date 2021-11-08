@@ -42,10 +42,12 @@ import matplotlib.pyplot as plt
 logger = logging.getLogger (__name__)
 NBITS    = 8
 ###################################################
-SOURCES  =  ['R3', 'R67', 'B0329+54']
+SOURCES  =  ['R3', 'R67', 'B0329+54', '3C48']
 RAD      =  dict (R3=29.50312583, R67=77.01525833)
 DECD     =  dict (R3=65.71675422, R67=26.06106111)
 DMD      =  dict (R3=348.82, R67=411.)
+RAD['3C48']      = 24.4220417
+DECD['3C48']     = 33.1597417
 RAD['B0329+54']  = 53.2475400
 DECD['B0329+54'] = 54.5787025
 DMD['B0329+54']  = 26.7641
@@ -54,7 +56,8 @@ def get_band (f):
     """gets band from filename"""
     fdot   = f.split('.')
     ss     = fdot[0].split('_')
-    ret    = dict (beam=ss[2], flow=float(ss[3]), bw=float(ss[4]), fftint=int(ss[5]))
+    #ret    = dict (beam=ss[2], flow=float(ss[3]), bw=float(ss[4]), fftint=int(ss[5]))
+    ret    = dict (beam=ss[-5], flow=float(ss[-4]), bw=float(ss[-3]), fftint=int(ss[-2]))
     return ret
 
 class ObsInfo(object):
