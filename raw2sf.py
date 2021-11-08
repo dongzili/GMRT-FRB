@@ -105,7 +105,7 @@ if __name__ == "__main__":
     logging.info (f"Output search-mode psrfits = {outfile}")
 
     # Fill in the ObsInfo class
-    d = ObsInfo (rawt.mjd, 'search')
+    d = BaseObsInfo (rawt.mjd, 'search')
     d.fill_freq_info (nch, band['bw'], freqs)
     d.fill_source_info (args.source, RAD[args.source], DECD[args.source])
     d.fill_beam_info (args.beam_size)

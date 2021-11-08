@@ -167,7 +167,7 @@ if __name__ == "__main__":
 
         ## setup ar
         # Fill in the ObsInfo class
-        d = ObsInfo (utime_start.mjd, 'snippet')
+        d = BaseObsInfo (utime_start.mjd, 'snippet')
         d.fill_freq_info (nch, band['bw'], freqs)
         d.fill_source_info (args.source, RAD[args.source], DECD[args.source])
         d.fill_beam_info (args.beam_size)
