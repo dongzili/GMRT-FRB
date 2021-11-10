@@ -74,7 +74,7 @@ if __name__ == "__main__":
     rawt = read_hdr (hdr)
     logging.info (f"Raw MJD            = {rawt.mjd:.5f}")
     ### read raw
-    rfb  = np.memmap (raw, dtype=np.uint16, mode='r', offset=0, )
+    rfb  = np.memmap (raw, dtype=np.int16, mode='r', offset=0, )
     fb   = rfb.reshape ((-1, nch, npl))
     logging.debug (f"Raw shape         = {fb.shape}")
     ### read freq/tsamp

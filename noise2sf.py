@@ -95,9 +95,9 @@ if __name__ == "__main__":
     logging.info (f"Raw ON MJD            = {rawt_on.mjd:.5f}")
     logging.info (f"Raw OFF MJD           = {rawt_of.mjd:.5f}")
     ### read raw
-    rfb_on  = np.memmap (raw_on, dtype=np.uint16, mode='r', offset=0, )
+    rfb_on  = np.memmap (raw_on, dtype=np.int16, mode='r', offset=0, )
     fb_on   = rfb_on.reshape ((-1, nch, npl))
-    rfb_of  = np.memmap (raw_of, dtype=np.uint16, mode='r', offset=0, )
+    rfb_of  = np.memmap (raw_of, dtype=np.int16, mode='r', offset=0, )
     fb_of   = rfb_of.reshape ((-1, nch, npl))
     logging.debug (f"Raw ON shape         = {fb_on.shape}")
     logging.debug (f"Raw OFF shape        = {fb_of.shape}")
