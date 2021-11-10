@@ -19,7 +19,7 @@ __all__ = ['SNIP_SOURCES', 'MISC_SOURCES', 'RAD', 'DECD', 'DMD', 'BaseObsInfo', 
 
 ###################################################
 SNIP_SOURCES  =  ['R3', 'R67']
-MISC_SOURCES  =  ['B0329+54', '3C48']
+MISC_SOURCES  =  ['B0329+54', '3C48', '3C147', '3C138']
 SOURCES  =  SNIP_SOURCES + MISC_SOURCES
 
 RAD      =  dict (R3=29.50312583, R67=77.01525833)
@@ -30,6 +30,10 @@ DECD['3C48']     = 33.1597417
 RAD['B0329+54']  = 53.2475400
 DECD['B0329+54'] = 54.5787025
 DMD['B0329+54']  = 26.7641
+RAD['3C147']     = 84.6812917
+DECD['3C147']    = 49.8285556
+RAD['3C138']     = 79.5687917
+DECD['3C138']    = 16.5907806
 ###################################################
 EDTYPE = np.float32
 MODES  = ['search', 'snippet', 'cal']
@@ -207,7 +211,7 @@ class BaseObsInfo(object):
             offs_sub in seconds
         """
         mjds  = self.start_time + offs_sub*au.second
-        lst_sub = np.array ([self.__get_lst__ (m, self.longitude) for m in mjds])
+        lst_sub = np.array ([self.__get_lst__ (m.mjd, self.longitude) for m in mjds])
         return lst_sub
 
     def __format_date__ (self, date_str):
@@ -433,7 +437,8 @@ class BaseObsInfo(object):
         its an empty header
         its a  dummy table
 
-        fold at 1 Hz - need to check with snippet nbins and tsamp XXX 
+        fold at 1 Hz - need to check with snippet nbins and tsamp 
+        fold_hz is (nbins * tsamp)**-1
 
         nspan is 1440 which is a day
         """
@@ -441,6 +446,11 @@ class BaseObsInfo(object):
 
         if self.mode != "snippet":
             raise ValueError (" reached snippet mode without snippet ")
+
+        if self.nbins is None:
+            raise ValueError ("nbins should have been realized")
+
+        fold_hz = (self.nbins * self.tsamp)**-1
 
         t_hdr = fits.Header()
         poc_columns = [
@@ -456,7 +466,7 @@ class BaseObsInfo(object):
 
             fits.Column(name="REF_MJD",   format="1D",  array=[[self.start_time.mjd]]),
             fits.Column(name="REF_PHS",   format="1D",  array=[[0.]]),
-            fits.Column(name="REF_F0",    format="1D",  unit="Hz", array=[[1.]]),
+            fits.Column(name="REF_F0",    format="1D",  unit="Hz", array=[[fold_hz]]),
 
             fits.Column(name="LGFITERR",  format="1D",  array=[[0.]]),
             fits.Column(name="COEFF",     format="15D", array=[[0.]*15]),

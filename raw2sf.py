@@ -70,7 +70,6 @@ if __name__ == "__main__":
     hdr  = raw + ".hdr"
     logging.info (f"Raw file           = {raw}")
     logging.info (f"Raw header file    = {hdr}")
-    logging.info (f"Raw band           = {band}")
     ### read time
     rawt = read_hdr (hdr)
     logging.info (f"Raw MJD            = {rawt.mjd:.5f}")
@@ -82,8 +81,9 @@ if __name__ == "__main__":
     band = get_band  (baw)
     tsamp= get_tsamp (band, nch)
     freqs= get_freqs (band, nch, lsb=args.lsb, usb=args.usb)
+    logging.info (f"Raw band           = {band}")
     logging.debug (f"Tsamp             = {tsamp}")
-    logging.debug (f"Frequencies       = {freqs[0]:.0f} ... {freqs[-1]:.0f}")
+    logging.debug (f"Frequencies       = {freqs[0]:.3f} ... {freqs[-1]:.3f}")
     #################################
     nsamples   = fb.shape[0]
     nrows      = nsamples // GULP

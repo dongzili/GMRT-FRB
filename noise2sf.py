@@ -87,7 +87,7 @@ if __name__ == "__main__":
         raise ValueError ("FFT integration not same")
     if band_on['bw'] != band_of['bw']:
         raise ValueError ("Bandwidth not same")
-    if band_on['flow'] != band_of['flow']:
+    if band_on['fedge'] != band_of['fedge']:
         raise ValueError ("Band not same")
     ### read time
     rawt_on = read_hdr (hdr_on)
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     band = band_on
     tsamp= get_tsamp (band, nch)
     freqs= get_freqs (band, nch, lsb=args.lsb, usb=args.usb)
-    logging.debug (f"Frequencies       = {freqs[0]:.0f} ... {freqs[-1]:.0f}")
+    logging.debug (f"Frequencies       = {freqs[0]:.3f} ... {freqs[-1]:.3f}")
     #################################
     nsamples   = min (fb_on.shape[0],fb_of.shape[0])
     nrows      = nsamples // GULP
@@ -162,7 +162,7 @@ if __name__ == "__main__":
 
     # Fill in the headers
     phdr      = d.fill_primary_header(chan_dm=0., scan_len=t_row * nrows)
-    subinthdr = d.fill_table_header(GULP)
+    subinthdr = d.fill_search_table_header(GULP)
     fits_data = fits.HDUList()
 
     subint_columns = [

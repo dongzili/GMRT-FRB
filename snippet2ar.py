@@ -22,8 +22,14 @@ import os
 import logging
 
 import numpy as np
+import pandas as pd
+
+import tqdm
 
 from astropy.io import fits
+
+import astropy.time  as at
+import astropy.units as au
 
 from obsinfo import *
 
@@ -61,7 +67,7 @@ def get_args ():
     import argparse
     agp = argparse.ArgumentParser ("2ar", description="Converts burst snippets to PSRFITS", epilog="GMRT-FRB polarization pipeline")
     add = agp.add_argument
-    add ('file',help='Raw file')
+    add ('raw',help='Raw file')
     add ('-c,--nchan', help='Number of channels', type=int, required=True, dest='nchans')
     add ('-s', '--source', help='Source', choices=SNIP_SOURCES, required=True)
     add ('--lsb', help='Lower subband', action='store_true', dest='lsb')
@@ -95,7 +101,6 @@ if __name__ == "__main__":
     hdr  = raw + ".hdr"
     logging.info (f"Raw file           = {raw}")
     logging.info (f"Raw header file    = {hdr}")
-    logging.info (f"Raw band           = {band}")
     ### read time
     rawt = read_hdr (hdr)
     logging.info (f"Raw MJD            = {rawt.mjd:.5f}")
@@ -107,8 +112,9 @@ if __name__ == "__main__":
     band = get_band  (baw)
     tsamp= get_tsamp (band, nch)
     freqs= get_freqs (band, nch, lsb=args.lsb, usb=args.usb)
+    logging.info (f"Raw band           = {band}")
     logging.debug (f"Tsamp             = {tsamp}")
-    logging.debug (f"Frequencies       = {freqs[0]:.0f} ... {freqs[-1]:.0f}")
+    logging.debug (f"Frequencies       = {freqs[0]:.3f} ... {freqs[-1]:.3f}")
     scan_time = tsamp * fb.shape[0]
     logging.debug (f"Scan len          = {scan_time:.3f} s")
     #################################
@@ -117,15 +123,15 @@ if __name__ == "__main__":
     # delays
     ref_freq = np.max (freqs) + 0.5*abs (freqs[1]-freqs[0])
     logging.debug (f"Reference freq    = {ref_freq} MHz")
-    f_delays = np.zeros (nchans, dtype=np.int64)
+    f_delays = np.zeros (nch, dtype=np.int64)
     for ichan, freq in enumerate (freqs):
-        f_delays[ichan] = int (dispdelay (DM, freq, ref_freq)/tsamp)
+        f_delays[ichan] = int (dispdelay (dm, freq, ref_freq)/tsamp)
     max_delay  = np.max (f_delays)
     logging.debug (f"Delays            = {f_delays[0]:d} ... {f_delays[-1]:d}")
     #################################
     ## read toa csv
     toa  = pd.read_csv (args.toa)
-    logging.debug ("TOA file           = {args.toa}")
+    logging.debug (f"TOA file           = {args.toa}")
     it   = tqdm.tqdm (toa.index, unit='toa', desc='Snippet')
     #################################
     nbins = args.nbins
@@ -158,7 +164,7 @@ if __name__ == "__main__":
         ddwork       = np.float64 (ddpkg)
         ddwork[ddwork > 2**15] -= 2**16
 
-        stokes_pkg   = np.zeros_like (work_data)
+        stokes_pkg   = np.zeros_like (ddwork)
         # IQUV
         stokes_pkg[...,0] = ddwork[...,0] + ddwork[...,2]
         stokes_pkg[...,1] = ddwork[...,1]
@@ -222,14 +228,14 @@ if __name__ == "__main__":
             fits.Column(name="PAR_ANG",  format="1E", unit="deg", array=par_ang),
             fits.Column(name="TEL_AZ",   format="1E", unit="deg", array=tel_az),
             fits.Column(name="TEL_ZEN",  format="1E", unit="deg", array=tel_zen),
-            fits.Column(name="DAT_FREQ", format=f"{nchans:d}E", unit="MHz", array=dat_freq),
-            fits.Column(name="DAT_WTS",  format=f"{nchans:d}E", array=dat_wts),
-            fits.Column(name="DAT_OFFS", format=f"{nchans*npol:d}E", array=dat_offs),
-            fits.Column(name="DAT_SCL",  format=f"{nchans*npol:d}E", array=dat_scl),
+            fits.Column(name="DAT_FREQ", format=f"{nch:d}E", unit="MHz", array=dat_freq),
+            fits.Column(name="DAT_WTS",  format=f"{nch:d}E", array=dat_wts),
+            fits.Column(name="DAT_OFFS", format=f"{nch*npl:d}E", array=dat_offs),
+            fits.Column(name="DAT_SCL",  format=f"{nch*npl:d}E", array=dat_scl),
             fits.Column(
                 name="DATA",
-                format=f"{nbins*nchans*npol:d}I",
-                dim=f"({nbins}, {nchans}, {npol})",
+                format=f"{nbins*nch*npl:d}I",
+                dim=f"({nbins}, {nch}, {npl})",
                 array=dat,
             ),
         ]
