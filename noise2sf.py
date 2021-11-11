@@ -107,6 +107,8 @@ if __name__ == "__main__":
     freqs= get_freqs (band, nch, lsb=args.lsb, usb=args.usb)
     logging.debug (f"Frequencies       = {freqs[0]:.3f} ... {freqs[-1]:.3f}")
     #################################
+    rdi        = Redigitize (GULP, nch, npl)
+    #################################
     nsamples   = min (fb_on.shape[0],fb_of.shape[0])
     nrows      = nsamples // GULP
     #print ("################################")
@@ -256,10 +258,17 @@ if __name__ == "__main__":
         sdat[:]     = np.roll (rdat, 768, axis=0)
 
         ###
-        ## axis ordering
-        pdat[:] = np.moveaxis (sdat, 0, -1)
+        ## data wrangling
+        rdi (sdat)
 
-        subint_sf.data[isubint]['DATA'] = np.uint8 (pdat.T[:] >> args.bitshift)
+        ###
+        ## axis ordering
+        # pdat[:] = np.moveaxis (sdat, 0, -1)
+
+        # subint_sf.data[isubint]['DATA'] = np.uint8 (pdat.T[:] >> args.bitshift)
+        subint_sf.data[isubint]['DATA'][:]      = rdi.dat[:]
+        subint_sf.data[isubint]['DAT_SCL'][:]   = rdi.dat_scl[:]
+        subint_sf.data[isubint]['DAT_OFFS'][:]  = rdi.dat_offs[:]
         isubint = isubint + 1
 
         ## flush?

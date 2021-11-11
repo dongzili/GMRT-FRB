@@ -31,6 +31,8 @@ from astropy.io import fits
 
 from obsinfo import *
 
+from redigitize import Redigitize
+
 ################################
 logger = logging.getLogger (__name__)
 
@@ -84,6 +86,8 @@ if __name__ == "__main__":
     logging.info (f"Raw band           = {band}")
     logging.debug (f"Tsamp             = {tsamp}")
     logging.debug (f"Frequencies       = {freqs[0]:.3f} ... {freqs[-1]:.3f}")
+    #################################
+    rdi        = Redigitize (GULP, nch, npl)
     #################################
     nsamples   = fb.shape[0]
     nrows      = nsamples // GULP
@@ -189,13 +193,14 @@ if __name__ == "__main__":
     #################################
     ## work loop
     isubint = 0
-    udat     = np.zeros ((GULP, nch, npl), dtype=np.int16)
-    pdat     = np.zeros ((nch, npl, GULP), dtype=np.uint16)
+    # udat     = np.zeros ((GULP, nch, npl), dtype=np.int16)
+    # pdat     = np.zeros ((nch, npl, GULP), dtype=np.uint16)
     for i in tr:
         udat[:] = 0
         pdat[:] = 0
         pkg    = fb[i:(i+GULP)]
         ### data wrangling
+        rdi (pkg)
         """
         data ordering : (nchans, npol, nsblk*nbits/8)
 
@@ -207,16 +212,19 @@ if __name__ == "__main__":
         ###
         ## GMRT pol order to full stokes IQUV
         ## may need to complicate to support total intensity
-        udat[...,0] = pkg[...,0] + pkg[...,2]
-        udat[...,1] = pkg[...,1]
-        udat[...,2] = pkg[...,3]
-        udat[...,3] = pkg[...,0] - pkg[...,2]
+        # udat[...,0] = pkg[...,0] + pkg[...,2]
+        # udat[...,1] = pkg[...,1]
+        # udat[...,2] = pkg[...,3]
+        # udat[...,3] = pkg[...,0] - pkg[...,2]
 
         ###
         ## axis ordering
-        pdat[:] = np.moveaxis (udat, 0, -1)
+        # pdat[:] = np.moveaxis (udat, 0, -1)
 
-        subint_sf.data[isubint]['DATA'] = np.uint8 (pdat.T[:] >> args.bitshift)
+        # subint_sf.data[isubint]['DATA'] = np.uint8 (pdat.T[:] >> args.bitshift)
+        subint_sf.data[isubint]['DATA'][:]      = rdi.dat[:]
+        subint_sf.data[isubint]['DAT_SCL'][:]   = rdi.dat_scl[:]
+        subint_sf.data[isubint]['DAT_OFFS'][:]  = rdi.dat_offs[:]
         isubint = isubint + 1
 
         ## flush?
