@@ -35,6 +35,8 @@ from astropy.io import fits
 
 from obsinfo import *
 
+from redigitize import Redigitize
+
 logger = logging.getLogger (__name__)
 ###################################################
 def get_args ():
@@ -267,8 +269,8 @@ if __name__ == "__main__":
 
         # subint_sf.data[isubint]['DATA'] = np.uint8 (pdat.T[:] >> args.bitshift)
         subint_sf.data[isubint]['DATA'][:]      = rdi.dat[:]
-        subint_sf.data[isubint]['DAT_SCL'][:]   = rdi.dat_scl[:]
-        subint_sf.data[isubint]['DAT_OFFS'][:]  = rdi.dat_offs[:]
+        subint_sf.data[isubint]['DAT_SCL'][:]   = rdi.dat_scl.ravel()
+        subint_sf.data[isubint]['DAT_OFFS'][:]  = rdi.dat_offs.ravel()
         isubint = isubint + 1
 
         ## flush?

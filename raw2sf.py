@@ -196,8 +196,8 @@ if __name__ == "__main__":
     # udat     = np.zeros ((GULP, nch, npl), dtype=np.int16)
     # pdat     = np.zeros ((nch, npl, GULP), dtype=np.uint16)
     for i in tr:
-        udat[:] = 0
-        pdat[:] = 0
+        #udat[:] = 0
+        #pdat[:] = 0
         pkg    = fb[i:(i+GULP)]
         ### data wrangling
         rdi (pkg)
@@ -223,8 +223,8 @@ if __name__ == "__main__":
 
         # subint_sf.data[isubint]['DATA'] = np.uint8 (pdat.T[:] >> args.bitshift)
         subint_sf.data[isubint]['DATA'][:]      = rdi.dat[:]
-        subint_sf.data[isubint]['DAT_SCL'][:]   = rdi.dat_scl[:]
-        subint_sf.data[isubint]['DAT_OFFS'][:]  = rdi.dat_offs[:]
+        subint_sf.data[isubint]['DAT_SCL'][:]   = rdi.dat_scl.ravel()
+        subint_sf.data[isubint]['DAT_OFFS'][:]  = rdi.dat_offs.ravel()
         isubint = isubint + 1
 
         ## flush?
