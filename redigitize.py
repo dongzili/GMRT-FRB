@@ -63,10 +63,13 @@ class Redigitize:
 
         ##
         ## stokes computation
+        ## see https://arxiv.org/pdf/2004.08542.pdf
+        ## XXX RR, RL*, LL, R*L
         self.sdat[...,0] = gfb[...,0] + gfb[...,2]
-        self.sdat[...,1] = gfb[...,1]
-        self.sdat[...,2] = gfb[...,3]
-        self.sdat[...,3] = gfb[...,0] - gfb[...,2]
+        self.sdat[...,1] = -gfb[...,1] - gfb[...,3]
+        self.sdat[...,2] = gfb[...,1] - gfb[...,3]
+        self.sdat[...,3] = gfb[...,2] - gfb[...,0]
+
 
         ##
         ## offset computation

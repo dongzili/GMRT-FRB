@@ -261,16 +261,21 @@ class BaseObsInfo(object):
         )
         p_hdr["NRCVR"] = (2, "Number of receiver polarisation channels     ")
         p_hdr["FD_POLN"] = ("CIRC", "LIN or CIRC                                  ")
-        p_hdr["FD_HAND"] = (-1, "+/- 1. +1 is LIN:A=X,B=Y, CIRC:A=L,B=R (I)   ")
+        p_hdr["FD_HAND"] = (+1, "+/- 1. +1 is LIN:A=X,B=Y, CIRC:A=L,B=R (I)   ")
 
         ### XXX
-        p_hdr["FD_SANG"] = (0.0, "[deg] FA of E vect for equal sigma in A&B (E)  ")
+        """
+        polpl4 = 
+        		sang=45, xyph=0, phase=1, dcc=0
+        """
+        p_hdr["FD_SANG"] = (45.0, "[deg] FA of E vect for equal sigma in A&B (E)  ")
         p_hdr["FD_XYPH"] = (0.0, "[deg] Phase of A^* B for injected cal (E)    ")
 
         p_hdr["BACKEND"]  = ("uGMRT", "Backend ID                                   ")
         p_hdr["BECONFIG"] = ("N/A", "Backend configuration file name              ")
         ### XXX
         ## BE_PHASE affects StokesV so check
+        ## XXX all usb's so it should be +ive???
         p_hdr["BE_PHASE"] = (+1, "0/+1/-1 BE cross-phase:0 unknown,+/-1 std/rev")
         ## in some uGMRT bands, the top subband is taken and in some the lower subband is
         p_hdr["BE_DCC"]   = (0, "0/1 BE downconversion conjugation corrected  ")
