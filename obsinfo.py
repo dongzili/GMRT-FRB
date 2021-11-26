@@ -137,8 +137,16 @@ class BaseObsInfo(object):
         self.longitude     = self.el.lon.degree
 
         ## XXX only supporting full stokes for now
+        """
+        2021-11-24 SB: psrchive is quirky:
+        - if given basis is linear   = IQUV
+        - if given basis is circular = IVQU
+
+        hence, it is better to use AABBCRCI
+        """
         self.npoln         = 4
-        self.poln_order    = "IQUV"
+        self.poln_order    = "AABBCRCI"
+        #self.poln_order    = "IVQU"
 
         ## mjd
         ### 

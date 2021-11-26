@@ -215,17 +215,11 @@ if __name__ == "__main__":
     #################################
     ## work loop
     isubint = 0
-    udat     = np.zeros ((hGULP, nch, npl), dtype=np.int16)
-    vdat     = np.zeros ((hGULP, nch, npl), dtype=np.int16)
     rdat     = np.zeros ((GULP, nch, npl), dtype=np.int16)
     sdat     = np.zeros ((GULP, nch, npl), dtype=np.int16)
-    pdat     = np.zeros ((nch, npl, GULP), dtype=np.uint16)
     # slices
 
     for i in tr:
-        udat[:] = 0
-        vdat[:] = 0
-        pdat[:] = 0
         rdat[:] = 0
         sdat[:] = 0
         ### reading
@@ -241,22 +235,9 @@ if __name__ == "__main__":
         dat shape = (nchans, npol  , nsamps)
         """
         ###
-        ## GMRT pol order to full stokes IQUV
-        ## may need to complicate to support total intensity
-        udat[...,0] = pkg_on[...,0] + pkg_on[...,2]
-        udat[...,1] = pkg_on[...,1]
-        udat[...,2] = pkg_on[...,3]
-        udat[...,3] = pkg_on[...,0] - pkg_on[...,2]
-
-        vdat[...,0] = pkg_of[...,0] + pkg_of[...,2]
-        vdat[...,1] = pkg_of[...,1]
-        vdat[...,2] = pkg_of[...,3]
-        vdat[...,3] = pkg_of[...,0] - pkg_of[...,2]
-
-        ###
         ## OFF-ON-OFF
-        rdat[:hGULP] = udat[:]
-        rdat[hGULP:] = vdat[:]
+        rdat[:hGULP] = pkg_on[:]
+        rdat[hGULP:] = pkg_of[:]
         sdat[:]     = np.roll (rdat, 768, axis=0)
 
         ###

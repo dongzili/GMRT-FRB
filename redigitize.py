@@ -25,6 +25,13 @@ class Redigitize:
         ran             = iinfo.max - iinfo.min
         self.omin       = - ran // 2
         self.omax       = ran // 2
+        self.ofac       = None
+        if odtype == np.uint8:
+            self.ofac   = 40
+        elif odtype == np.uint16:
+            self.ofac   = 10880
+        if self.ofac is None:
+            raise ValueError ("unable to set ofac")
 
         self.gulp       = gulp
         self.nchans     = nchans
@@ -65,10 +72,21 @@ class Redigitize:
         ## stokes computation
         ## see https://arxiv.org/pdf/2004.08542.pdf
         ## XXX RR, RL*, LL, R*L
-        self.sdat[...,0] = gfb[...,0] + gfb[...,2]
-        self.sdat[...,1] = -gfb[...,1] - gfb[...,3]
-        self.sdat[...,2] = gfb[...,1] - gfb[...,3]
-        self.sdat[...,3] = gfb[...,2] - gfb[...,0]
+        #self.sdat[...,0] = gfb[...,0] + gfb[...,2]
+        #self.sdat[...,1] = -gfb[...,1] - gfb[...,3]
+        #self.sdat[...,2] = gfb[...,1] - gfb[...,3]
+        #self.sdat[...,3] = gfb[...,2] - gfb[...,0]
+        ## 2021-11-24 SB: see discussion in POL_TYPE in obsinfo
+        ## XXX AABBCRCI === RR,LL,RL*,R*L
+        self.sdat[...,0] = gfb[...,0]
+        self.sdat[...,1] = gfb[...,2]
+        self.sdat[...,2] = gfb[...,1]
+        self.sdat[...,3] = gfb[...,3]
+        ## POL_TYPE = "IVQU" circular basis
+        #self.sdat[...,0] = gfb[...,0] + gfb[...,2]
+        #self.sdat[...,1] = gfb[...,2] - gfb[...,0]
+        #self.sdat[...,2] = -gfb[...,1] - gfb[...,3]
+        #self.sdat[...,3] = gfb[...,1] - gfb[...,3]
 
 
         ##
@@ -95,12 +113,13 @@ class Redigitize:
 
         ##
         ## digitize
+        # XXX 20211126 - SB: i am stupid enough to not add the scaling step here
         #### sdat is (nsamps, nchans, npol)
         #### bdat is (nsamps, npol, nchans)
-        self.dat[:,0,:] = np.clip (self.sdat[...,0], self.omin, self.omax)+self.omin
-        self.dat[:,1,:] = np.clip (self.sdat[...,1], self.omin, self.omax)+self.omin
-        self.dat[:,2,:] = np.clip (self.sdat[...,2], self.omin, self.omax)+self.omin
-        self.dat[:,3,:] = np.clip (self.sdat[...,3], self.omin, self.omax)+self.omin
+        self.dat[:,0,:] = np.clip (self.ofac * self.sdat[...,0], self.omin, self.omax)+self.omin
+        self.dat[:,1,:] = np.clip (self.ofac * self.sdat[...,1], self.omin, self.omax)+self.omin
+        self.dat[:,2,:] = np.clip (self.ofac * self.sdat[...,2], self.omin, self.omax)+self.omin
+        self.dat[:,3,:] = np.clip (self.ofac * self.sdat[...,3], self.omin, self.omax)+self.omin
 
 
 if __name__ == "__main__":
