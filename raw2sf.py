@@ -41,12 +41,10 @@ def get_args ():
     agp = argparse.ArgumentParser ("raw2sf", description="Converts uGMRT raw to search-mode PSRFITS", epilog="GMRT-FRB polarization pipeline")
     add = agp.add_argument
     add ('-c,--nchan', help='Number of channels', type=int, required=True, dest='nchans')
-    add ('-b,--bit-shift', help='Bitshift', type=int, dest='bitshift', default=6)
     add ('--lsb', help='Lower subband', action='store_true', dest='lsb')
     add ('--usb', help='Upper subband', action='store_true', dest='usb')
     add ('--gulp', help='Samples in a block', dest='gulp', default=2048, type=int)
     add ('--beam-size', help='Beam size in arcsec', dest='beam_size', default=4, type=float)
-    add ('-s', '--source', help='Source', choices=MISC_SOURCES, required=True)
     add ('-O', '--outdir', help='Output directory', default="./")
     add ('-d','--debug', action='store_const', const=logging.DEBUG, dest='loglevel')
     add ('-v','--verbose', action='store_const', const=logging.INFO, dest='loglevel')
@@ -75,6 +73,11 @@ if __name__ == "__main__":
     ### read time
     rawt = read_hdr (hdr)
     logging.info (f"Raw MJD            = {rawt.mjd:.5f}")
+    ### read source
+    src  = baw.split('_')[0].upper()
+    logging.info (f"Source             = {src}")
+    if src not in MISC_SOURCES:
+        raise ValueError (" source not found")
     ### read raw
     rfb  = np.memmap (raw, dtype=np.int16, mode='r', offset=0, )
     fb   = rfb.reshape ((-1, nch, npl))
@@ -111,7 +114,7 @@ if __name__ == "__main__":
     # Fill in the ObsInfo class
     d = BaseObsInfo (rawt.mjd, 'search')
     d.fill_freq_info (nch, band['bw'], freqs)
-    d.fill_source_info (args.source, RAD[args.source], DECD[args.source])
+    d.fill_source_info (src, RAD[src], DECD[src])
     d.fill_beam_info (args.beam_size)
     d.fill_data_info (tsamp) 
 
@@ -137,6 +140,10 @@ if __name__ == "__main__":
     tel_zen           = np.zeros(nrows, dtype=np.float32)
     dat_freq          = np.vstack([freqs] * nrows).astype(np.float32)
     dat_wts           = np.ones((nrows, nch), dtype=np.float32)
+    # XXX 2021-11-30 SB: manual flagging
+    dat_wts[:,:20]    = 0
+    dat_wts[:,-10:]   = 0
+    dat_wts[:,1044:1054] = 0
     dat_offs          = np.zeros((nrows,nch,npl),dtype=np.float32)
     dat_scl           = np.ones((nrows,nch,npl),dtype=np.float32)
     # dat               = np.zeros((n_subints, row_size), dtype=np.uint8)

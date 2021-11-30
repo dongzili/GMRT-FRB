@@ -19,7 +19,7 @@ __all__ = ['SNIP_SOURCES', 'MISC_SOURCES', 'RAD', 'DECD', 'DMD', 'BaseObsInfo', 
 
 ###################################################
 SNIP_SOURCES  =  ['R3', 'R67']
-MISC_SOURCES  =  ['B0329+54', '3C48', '3C147', '3C138']
+MISC_SOURCES  =  ['B0329+54', '3C48', '3C147', '3C138', 'J0139+5814']
 SOURCES  =  SNIP_SOURCES + MISC_SOURCES
 
 RAD      =  dict (R3=29.50312583, R67=77.01525833)
@@ -34,6 +34,9 @@ RAD['3C147']     = 84.6812917
 DECD['3C147']    = 49.8285556
 RAD['3C138']     = 79.5687917
 DECD['3C138']    = 16.5907806
+RAD['J0139+5814']= 24.832250
+DECD['J0139+5814']= 58.242172
+DMD['J0139+5814']= 73.81141
 ###################################################
 EDTYPE = np.float32
 MODES  = ['search', 'snippet', 'cal']
