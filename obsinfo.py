@@ -269,14 +269,13 @@ class BaseObsInfo(object):
         )
         p_hdr["NRCVR"] = (2, "Number of receiver polarisation channels     ")
         p_hdr["FD_POLN"] = ("CIRC", "LIN or CIRC                                  ")
-        p_hdr["FD_HAND"] = (+1, "+/- 1. +1 is LIN:A=X,B=Y, CIRC:A=L,B=R (I)   ")
+        p_hdr["FD_HAND"] = (-1, "+/- 1. +1 is LIN:A=X,B=Y, CIRC:A=L,B=R (I)   ")
 
         ### XXX
         """
-        polpl4 = 
-        		sang=45, xyph=0, phase=1, dcc=0
+            WvS+?? psrchive+polcal paper says FD_SANG for circular feeds should be 0deg
         """
-        p_hdr["FD_SANG"] = (45.0, "[deg] FA of E vect for equal sigma in A&B (E)  ")
+        p_hdr["FD_SANG"] = (0.0, "[deg] FA of E vect for equal sigma in A&B (E)  ")
         p_hdr["FD_XYPH"] = (0.0, "[deg] Phase of A^* B for injected cal (E)    ")
 
         p_hdr["BACKEND"]  = ("uGMRT", "Backend ID                                   ")
