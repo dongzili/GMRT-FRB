@@ -33,6 +33,8 @@ import astropy.units as au
 
 from obsinfo import *
 
+from redigitize import Redigitize
+
 logger = logging.getLogger (__name__)
 
 ARFILE="{tmjd:15.10f}_lof{freq:3.0f}_{source}.ar"
@@ -105,7 +107,7 @@ if __name__ == "__main__":
     rawt = read_hdr (hdr)
     logging.info (f"Raw MJD            = {rawt.mjd:.5f}")
     ### read raw
-    rfb  = np.memmap (raw, dtype=np.uint16, mode='r', offset=0, )
+    rfb  = np.memmap (raw, dtype=np.int16, mode='r', offset=0, )
     fb   = rfb.reshape ((-1, nch, npl))
     logging.debug (f"Raw shape         = {fb.shape}")
     ### read freq/tsamp
@@ -136,6 +138,8 @@ if __name__ == "__main__":
     #################################
     nbins = args.nbins
     hbins = nbins // 2
+    #################################
+    rdi        = Redigitize (nbins, nch, npl, odtype=np.uint16)
     ## loop
     for i in it:
         sn   = toa.sn[i]
@@ -160,16 +164,8 @@ if __name__ == "__main__":
         ## dd
         ddpkg        = dedisperser (pkg, f_delays)
 
-        ## stoke-fy
-        ddwork       = np.float64 (ddpkg)
-        ddwork[ddwork > 2**15] -= 2**16
-
-        stokes_pkg   = np.zeros_like (ddwork)
-        # IQUV
-        stokes_pkg[...,0] = ddwork[...,0] + ddwork[...,2]
-        stokes_pkg[...,1] = ddwork[...,1]
-        stokes_pkg[...,2] = ddwork[...,3]
-        stokes_pkg[...,3] = ddwork[...,0] - ddwork[...,2]
+        ## rdi
+        rdi (ddpkg)
 
         ## setup ar
         # Fill in the ObsInfo class
@@ -211,7 +207,9 @@ if __name__ == "__main__":
         # dat               = np.zeros ((n_subints, nbins, nchans, npol), dtype=np.int16)
         dat               = np.zeros ((n_subints, npl, nch, nbins), dtype=np.int16)
 
-        dat[0]            = np.int16 (stokes_pkg.T)
+        dat[0]            = np.moveaxis (rdi.dat, 1, -1)
+        dat_offs[0]       = rdi.dat_offs[:]
+        dat_scl[0]        = rdi.dat_scl[:]
 
         ## make fold table columns
         # Make the columns
