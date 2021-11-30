@@ -33,11 +33,9 @@ import astropy.units as au
 
 from obsinfo import *
 
-from redigitize import Redigitize
-
 logger = logging.getLogger (__name__)
 
-ARFILE="{tmjd:15.10f}_lof{freq:3.0f}_{source}.ar"
+ARFILE="{tmjd:15.10f}_sn{sn:.2f}_lof{freq:3.0f}_{source}.ar"
 ###################################################
 DM_CONST = 4.148741601E3
 def dispdelay(DM,LOFREQ,HIFREQ):
@@ -138,8 +136,7 @@ if __name__ == "__main__":
     #################################
     nbins = args.nbins
     hbins = nbins // 2
-    #################################
-    rdi        = Redigitize (nbins, nch, npl, odtype=np.uint16)
+    coh_pkg  = np.zeros ((nbins, nch, npl), dtype=np.int16)
     ## loop
     for i in it:
         sn   = toa.sn[i]
@@ -152,7 +149,7 @@ if __name__ == "__main__":
             logging.warning (f" burst not in scan index={i:d} S/N={sn:.1f} time={pt_s:.3f} mjd={bmj:.10f}")
 
         ## output file
-        ofile  = os.path.join (args.outdir, ARFILE.format(tmjd=bmj, freq=ref_freq, source=args.source))
+        ofile  = os.path.join (args.outdir, ARFILE.format(tmjd=bmj, freq=ref_freq, source=args.source, sn=sn))
 
         ## slicing
         start_sample = int (pt_s / tsamp) - hbins
@@ -164,8 +161,13 @@ if __name__ == "__main__":
         ## dd
         ddpkg        = dedisperser (pkg, f_delays)
 
-        ## rdi
-        rdi (ddpkg)
+        ## coherence
+        ## XXX SB: not using `Redigitze` class since
+        ## we are writing as int16
+        coh_pkg[...,0]    = ddpkg[...,0]
+        coh_pkg[...,1]    = ddpkg[...,2]
+        coh_pkg[...,2]    = ddpkg[...,1]
+        coh_pkg[...,3]    = ddpkg[...,3]
 
         ## setup ar
         # Fill in the ObsInfo class
@@ -202,14 +204,19 @@ if __name__ == "__main__":
         dat_freq          = np.vstack([freqs] * n_subints).astype(np.float32)
 
         dat_wts           = np.ones((n_subints, nch), dtype=np.float32)
-        dat_offs          = np.zeros((n_subints, nch, npl), dtype=np.float32)
-        dat_scl           = np.ones((n_subints, nch, npl), dtype=np.float32)
-        # dat               = np.zeros ((n_subints, nbins, nchans, npol), dtype=np.int16)
+        # XXX 2021-11-30 SB: flagging top 20 and bottom 10 channels by default
+        dat_wts[0,1044:1054] = 0
+        dat_wts[0,:20]    = 0
+        dat_wts[0,-10:]   = 0
+        """
+        2021-11-30 SB: the ordering in fold-mode and search-mode is different
+        make note
+        """
+        dat_offs          = np.zeros((n_subints, npl, nch), dtype=np.float32)
+        dat_scl           = np.ones((n_subints, npl, nch), dtype=np.float32)
         dat               = np.zeros ((n_subints, npl, nch, nbins), dtype=np.int16)
 
-        dat[0]            = np.moveaxis (rdi.dat, 1, -1)
-        dat_offs[0]       = rdi.dat_offs[:]
-        dat_scl[0]        = rdi.dat_scl[:]
+        dat[0]            = coh_pkg.T
 
         ## make fold table columns
         # Make the columns
