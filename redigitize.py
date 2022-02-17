@@ -27,7 +27,7 @@ class Redigitize:
         self.omax       = ran // 2
         self.ofac       = None
         if odtype == np.uint8:
-            self.ofac   = 40
+            self.ofac   = 36
         elif odtype == np.uint16:
             self.ofac   = 10880
         if self.ofac is None:
@@ -116,10 +116,13 @@ class Redigitize:
         # XXX 20211126 - SB: i am stupid enough to not add the scaling step here
         #### sdat is (nsamps, nchans, npol)
         #### bdat is (nsamps, npol, nchans)
-        self.dat[:,0,:] = np.clip (self.ofac * self.sdat[...,0], self.omin, self.omax)+self.omin
-        self.dat[:,1,:] = np.clip (self.ofac * self.sdat[...,1], self.omin, self.omax)+self.omin
-        self.dat[:,2,:] = np.clip (self.ofac * self.sdat[...,2], self.omin, self.omax)+self.omin
-        self.dat[:,3,:] = np.clip (self.ofac * self.sdat[...,3], self.omin, self.omax)+self.omin
+        #self.dat[:,0,:] = np.clip (self.ofac * self.sdat[...,0], self.omin, self.omax)+self.omin
+        # XXX SB: how dumb can i be? v this is obviously wrong
+        #self.dat[:,0,:] = np.clip ( (self.ofac*self.sdat[...,0]) + self.omin, self.omin, self.omax)
+        self.dat[:,0,:] = np.clip ( (self.ofac*self.sdat[...,0]), self.omin, self.omax) + self.omin
+        self.dat[:,1,:] = np.clip ( (self.ofac*self.sdat[...,1]), self.omin, self.omax) + self.omin
+        self.dat[:,2,:] = np.clip ( (self.ofac*self.sdat[...,2]), self.omin, self.omax) + self.omin
+        self.dat[:,3,:] = np.clip ( (self.ofac*self.sdat[...,3]), self.omin, self.omax) + self.omin
 
 
 if __name__ == "__main__":
