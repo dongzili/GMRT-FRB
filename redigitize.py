@@ -27,11 +27,9 @@ class Redigitize:
         self.omax       = ran // 2
         self.ofac       = None
         if odtype == np.uint8:
-            self.ofac   = 36
+            self.ofac   = 29
         elif odtype == np.uint16:
             self.ofac   = 10880
-        if self.ofac is None:
-            raise ValueError ("unable to set ofac")
 
         self.gulp       = gulp
         self.nchans     = nchans
