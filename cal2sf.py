@@ -1,18 +1,15 @@
 """
 Convert Filterbank files to PSRFITS file
 
-Modified to convert uGMRT raw filterbank into PSRFITS snippets
+Subtracts quasar OFF from ON scan into a single PSRFITS searchmode file
 
 Major change(s):
     Only support for full stokes data
     Output PSRFITS is search-mode
-    `nbits` is 8 since uGMRT raw is 16bit
+    `nbits` is 32 since uGMRT raw is 16bit
 
 Original Source: https://github.com/rwharton/fil2psrfits
 Copied and modified from: https://github.com/thepetabyteproject/your/blob/master/your/formats/fitswriter.py
-
-XXX everything is done in memory because of dependency on `astropy.io.fits`
-using `fitsio` would alleviate and help run this more smoothly and on large size scans
 
 TODO
  - proper logging?
@@ -27,28 +24,36 @@ import logging
 
 import numpy as np
 
+import datetime as dt
+from   dateutil import tz
+
+import astropy.time  as at
+import astropy.units as au
+import astropy.coordinates as asc
+
 from astropy.io import fits
 
 from obsinfo import *
 
 from redigitize import Redigitize
 
-################################
 logger = logging.getLogger (__name__)
-
+###################################################
 def get_args ():
     import argparse
-    agp = argparse.ArgumentParser ("raw2sf", description="Converts uGMRT raw to search-mode PSRFITS", epilog="GMRT-FRB polarization pipeline")
+    agp = argparse.ArgumentParser ("cal2sf", description="Subtracts ON-OFF raw to search-mode PSRFITS", epilog="GMRT-FRB polarization pipeline")
     add = agp.add_argument
     add ('-c,--nchan', help='Number of channels', type=int, required=True, dest='nchans')
     add ('--lsb', help='Lower subband', action='store_true', dest='lsb')
     add ('--usb', help='Upper subband', action='store_true', dest='usb')
     add ('--gulp', help='Samples in a block', dest='gulp', default=2048, type=int)
     add ('--beam-size', help='Beam size in arcsec', dest='beam_size', default=4, type=float)
+    add ('-s', '--source', help='Source', choices=MISC_SOURCES, required=True)
     add ('-O', '--outdir', help='Output directory', default="./")
     add ('-d','--debug', action='store_const', const=logging.DEBUG, dest='loglevel')
     add ('-v','--verbose', action='store_const', const=logging.INFO, dest='loglevel')
-    add ('raw', help='Path to raw file',)
+    add ('raw_on', help='Path to ON raw file',)
+    add ('raw_off', help='Path to OFF raw file',)
     return agp.parse_args ()
 
 if __name__ == "__main__":
@@ -64,35 +69,47 @@ if __name__ == "__main__":
     GULP = args.gulp
     nch  = args.nchans
     npl  = 4
-    ###
-    raw  = args.raw
-    baw  = os.path.basename (raw)
-    hdr  = raw + ".hdr"
-    logging.info (f"Raw file           = {raw}")
-    logging.info (f"Raw header file    = {hdr}")
+    ############
+    raw_on  = args.raw_on
+    baw_on  = os.path.basename (raw_on)
+    hdr_on  = raw_on + ".hdr"
+    raw_of  = args.raw_off
+    baw_of  = os.path.basename (raw_of)
+    hdr_of  = raw_of + ".hdr"
+    logging.info (f"Raw ON file            = {raw_on}")
+    logging.info (f"Raw ON header file     = {hdr_on}")
+    logging.info (f"Raw OFF file           = {raw_of}")
+    logging.info (f"Raw OFF header file    = {hdr_of}")
+    #### band check
+    band_on = get_band (baw_on)
+    band_of = get_band (baw_of)
+    if band_on['fftint'] != band_of['fftint']:
+        raise ValueError ("FFT integration not same")
+    if band_on['bw'] != band_of['bw']:
+        raise ValueError ("Bandwidth not same")
+    if band_on['fedge'] != band_of['fedge']:
+        raise ValueError ("Band not same")
     ### read time
-    rawt = read_hdr (hdr)
-    logging.info (f"Raw MJD            = {rawt.mjd:.5f}")
-    ### read source
-    src  = baw.split('_')[0].upper()
-    logging.info (f"Source             = {src}")
-    if src not in MISC_SOURCES:
-        raise ValueError (" source not found")
+    rawt_on = read_hdr (hdr_on)
+    rawt_of = read_hdr (hdr_of)
+    logging.info (f"Raw ON MJD            = {rawt_on.mjd:.5f}")
+    logging.info (f"Raw OFF MJD           = {rawt_of.mjd:.5f}")
     ### read raw
-    rfb  = np.memmap (raw, dtype=np.int16, mode='r', offset=0, )
-    fb   = rfb.reshape ((-1, nch, npl))
-    logging.debug (f"Raw shape         = {fb.shape}")
+    rfb_on  = np.memmap (raw_on, dtype=np.int16, mode='r', offset=0, )
+    fb_on   = rfb_on.reshape ((-1, nch, npl))
+    rfb_of  = np.memmap (raw_of, dtype=np.int16, mode='r', offset=0, )
+    fb_of   = rfb_of.reshape ((-1, nch, npl))
+    logging.debug (f"Raw ON shape         = {fb_on.shape}")
+    logging.debug (f"Raw OFF shape        = {fb_of.shape}")
     ### read freq/tsamp
-    band = get_band  (baw)
+    band = band_on
     tsamp= get_tsamp (band, nch)
     freqs= get_freqs (band, nch, lsb=args.lsb, usb=args.usb)
-    logging.info (f"Raw band           = {band}")
-    logging.debug (f"Tsamp             = {tsamp}")
     logging.debug (f"Frequencies       = {freqs[0]:.3f} ... {freqs[-1]:.3f}")
     #################################
     rdi        = Redigitize (GULP, nch, npl)
     #################################
-    nsamples   = fb.shape[0]
+    nsamples   = min (fb_on.shape[0],fb_of.shape[0])
     nrows      = nsamples // GULP
     #print ("################################")
     #nrows      = 4
@@ -105,16 +122,16 @@ if __name__ == "__main__":
 
     row_size   = GULP * nch * npl * 2
 
-    tr         = tqdm.tqdm (range (0, fsamples, GULP), desc='raw2sf', unit='blk')
+    tr         = tqdm.tqdm (range (0, fsamples, GULP), desc='cal2sf', unit='blk')
     #################################
     ## setup psrfits file
-    outfile = os.path.join (args.outdir, baw + ".sf")
+    outfile = os.path.join (args.outdir, baw_on + ".cal.sf")
     logging.info (f"Output search-mode psrfits = {outfile}")
 
     # Fill in the ObsInfo class
-    d = BaseObsInfo (rawt.mjd, 'search')
+    d = BaseObsInfo (rawt_of.mjd, 'search')
     d.fill_freq_info (nch, band['bw'], freqs)
-    d.fill_source_info (src, RAD[src], DECD[src])
+    d.fill_source_info (args.source, RAD[args.source], DECD[args.source])
     d.fill_beam_info (args.beam_size)
     d.fill_data_info (tsamp) 
 
@@ -140,12 +157,6 @@ if __name__ == "__main__":
     tel_zen           = np.zeros(nrows, dtype=np.float32)
     dat_freq          = np.vstack([freqs] * nrows).astype(np.float32)
     dat_wts           = np.ones((nrows, nch), dtype=np.float32)
-    # XXX 2021-11-30 SB: manual flagging
-    # XXX 2022-02-18 SB: some more flagging
-    dat_wts[:,:50]    = 0
-    dat_wts[:,-10:]   = 0
-    dat_wts[:,942:955] = 0
-    dat_wts[:,1044:1054] = 0
     dat_offs          = np.zeros((nrows,nch,npl),dtype=np.float32)
     dat_scl           = np.ones((nrows,nch,npl),dtype=np.float32)
     # dat               = np.zeros((n_subints, row_size), dtype=np.uint8)
@@ -202,14 +213,17 @@ if __name__ == "__main__":
     #################################
     ## work loop
     isubint = 0
-    # udat     = np.zeros ((GULP, nch, npl), dtype=np.int16)
-    # pdat     = np.zeros ((nch, npl, GULP), dtype=np.uint16)
+    #rdat     = np.zeros ((GULP, nch, npl), dtype=np.int16)
+    sdat     = np.zeros ((GULP, nch, npl), dtype=np.int16)
+    # slices
+
     for i in tr:
-        #udat[:] = 0
-        #pdat[:] = 0
-        pkg    = fb[i:(i+GULP)]
+        #rdat[:] = 0
+        sdat[:] = 0
+        ### reading
+        #pkg_on  = fb_on[i:(i+GULP)]
+        #pkg_of  = fb_of[i:(i+GULP)]
         ### data wrangling
-        rdi (pkg)
         """
         data ordering : (nchans, npol, nsblk*nbits/8)
 
@@ -219,16 +233,18 @@ if __name__ == "__main__":
         dat shape = (nchans, npol  , nsamps)
         """
         ###
-        ## GMRT pol order to full stokes IQUV
-        ## may need to complicate to support total intensity
-        # udat[...,0] = pkg[...,0] + pkg[...,2]
-        # udat[...,1] = pkg[...,1]
-        # udat[...,2] = pkg[...,3]
-        # udat[...,3] = pkg[...,0] - pkg[...,2]
+        ## ON-OFF
+        #rdat[:hGULP] = pkg_on[:]
+        #rdat[hGULP:] = pkg_of[:]
+        sdat[:]     = fb_on[i:(i+GULP)] - fb_of[i:(i+GULP)]
+
+        ###
+        ## data wrangling
+        rdi (sdat)
 
         ###
         ## axis ordering
-        # pdat[:] = np.moveaxis (udat, 0, -1)
+        # pdat[:] = np.moveaxis (sdat, 0, -1)
 
         # subint_sf.data[isubint]['DATA'] = np.uint8 (pdat.T[:] >> args.bitshift)
         subint_sf.data[isubint]['DATA'][:]      = rdi.dat[:]
