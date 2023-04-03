@@ -24,9 +24,6 @@ import logging
 
 import numpy as np
 
-import datetime as dt
-from   dateutil import tz
-
 import astropy.time  as at
 import astropy.units as au
 import astropy.coordinates as asc
@@ -44,8 +41,8 @@ def get_args ():
     agp = argparse.ArgumentParser ("cal2sf", description="Subtracts ON-OFF raw to search-mode PSRFITS", epilog="GMRT-FRB polarization pipeline")
     add = agp.add_argument
     add ('-c,--nchan', help='Number of channels', type=int, required=True, dest='nchans')
-    add ('--lsb', help='Lower subband', action='store_true', dest='lsb')
-    add ('--usb', help='Upper subband', action='store_true', dest='usb')
+    add ('-b,--sb', help='Sideband',choices=['l','u','lower','upper'], dest='sideband', required=True)
+    add ('-f,--feed', help='Feed',choices=['cir','lin','c','l'], dest='feed', required=True)
     add ('--gulp', help='Samples in a block', dest='gulp', default=2048, type=int)
     add ('--beam-size', help='Beam size in arcsec', dest='beam_size', default=4, type=float)
     add ('-s', '--source', help='Source', choices=MISC_SOURCES, required=True)
@@ -60,13 +57,29 @@ if __name__ == "__main__":
     args = get_args ()
     logging.basicConfig (level=args.loglevel, format="%(asctime)s %(levelname)s %(message)s")
     #################################
+    if not os.path.exists (args.outdir):
+        os.mkdir (args.outdir)
+    #################################
     # subband logic
-    if args.lsb and args.usb:
-        raise ValueError (" cannot specify both subbands ")
-    if not (args.lsb or args.usb):
-        raise ValueError (" must specify atleast one subband ")
+    LSB     = False
+    USB     = False
+    if args.sideband == 'l' or args.sideband == 'lower':
+        LSB = True
+    else:
+        USB = True
+    # feed logic
+    feed    = ''
+    CIRC    = False
+    LIN     = False
+    if args.feed == 'c' or args.feed == 'cir':
+        CIRC = True
+        feed = 'CIRC'
+    else:
+        LIN  = True
+        feed = 'LIN'
     #################################
     GULP = args.gulp
+    hGULP= GULP // 2
     nch  = args.nchans
     npl  = 4
     ############
@@ -104,17 +117,17 @@ if __name__ == "__main__":
     ### read freq/tsamp
     band = band_on
     tsamp= get_tsamp (band, nch)
-    freqs= get_freqs (band, nch, lsb=args.lsb, usb=args.usb)
+    freqs= get_freqs (band, nch, lsb=LSB, usb=USB)
     logging.debug (f"Frequencies       = {freqs[0]:.3f} ... {freqs[-1]:.3f}")
     #################################
-    rdi        = Redigitize (GULP, nch, npl)
+    rdi        = Redigitize (GULP, nch, npl, feed)
     #################################
     nsamples   = min (fb_on.shape[0],fb_of.shape[0])
     nrows      = nsamples // GULP
     #print ("################################")
     #nrows      = 4
     #print ("################################")
-    fsamples   = nrows * GULP
+    fsamples   = nrows * hGULP
     last_row   = nsamples - fsamples
     logging.debug (f"Total samples     = {nsamples:d}")
     logging.debug (f"Number of rows    = {nrows:d}")
@@ -122,14 +135,14 @@ if __name__ == "__main__":
 
     row_size   = GULP * nch * npl * 2
 
-    tr         = tqdm.tqdm (range (0, fsamples, GULP), desc='cal2sf', unit='blk')
+    tr         = tqdm.tqdm (range (0, fsamples, hGULP), desc='cal2sf', unit='blk')
     #################################
     ## setup psrfits file
-    outfile = os.path.join (args.outdir, baw_on + ".cal.sf")
+    outfile = os.path.join (args.outdir, baw_on + ".calonoff.sf")
     logging.info (f"Output search-mode psrfits = {outfile}")
 
     # Fill in the ObsInfo class
-    d = BaseObsInfo (rawt_of.mjd, 'search')
+    d = BaseObsInfo (rawt_on.mjd, 'search', circular=CIRC, linear=LIN)
     d.fill_freq_info (nch, band['bw'], freqs)
     d.fill_source_info (args.source, RAD[args.source], DECD[args.source])
     d.fill_beam_info (args.beam_size)
@@ -213,16 +226,16 @@ if __name__ == "__main__":
     #################################
     ## work loop
     isubint = 0
-    #rdat     = np.zeros ((GULP, nch, npl), dtype=np.int16)
+    rdat     = np.zeros ((GULP, nch, npl), dtype=np.int16)
     sdat     = np.zeros ((GULP, nch, npl), dtype=np.int16)
     # slices
 
     for i in tr:
-        #rdat[:] = 0
+        rdat[:] = 0
         sdat[:] = 0
         ### reading
-        #pkg_on  = fb_on[i:(i+GULP)]
-        #pkg_of  = fb_of[i:(i+GULP)]
+        pkg_on  = fb_on[i:(i+hGULP)]
+        pkg_of  = fb_of[i:(i+hGULP)]
         ### data wrangling
         """
         data ordering : (nchans, npol, nsblk*nbits/8)
@@ -234,9 +247,10 @@ if __name__ == "__main__":
         """
         ###
         ## ON-OFF
-        #rdat[:hGULP] = pkg_on[:]
-        #rdat[hGULP:] = pkg_of[:]
-        sdat[:]     = fb_on[i:(i+GULP)] - fb_of[i:(i+GULP)]
+        rdat[:hGULP] = pkg_on[:]
+        rdat[hGULP:] = pkg_of[:]
+        #sdat[:]     = fb_on[i:(i+GULP)] - fb_of[i:(i+GULP)]
+        sdat[:]     = np.roll (rdat, 768, axis=0)
 
         ###
         ## data wrangling
