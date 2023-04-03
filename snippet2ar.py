@@ -70,9 +70,9 @@ def get_args ():
     add ('raw',help='Raw file')
     add ('-c,--nchan', help='Number of channels', type=int, required=True, dest='nchans')
     add ('-s', '--source', help='Source', choices=SNIP_SOURCES, required=True)
-    add ('--lsb', help='Lower subband', action='store_true', dest='lsb')
-    add ('--usb', help='Upper subband', action='store_true', dest='usb')
     ###
+    add ('-b,--sb', help='Sideband',choices=['l','u','lower','upper'], dest='sideband', required=True)
+    add ('-f,--feed', help='Feed',choices=['cir','lin','c','l'], dest='feed', required=True)
     add ('--toa',help='TOA csv', required=True, dest='toa')
     ###
     add ('-n,--nbins', help='Samples in the snippet', dest='nbins', default=1024, type=int)
@@ -85,12 +85,25 @@ def get_args ():
 if __name__ == "__main__":
     args = get_args ()
     logging.basicConfig (level=args.loglevel, format="%(asctime)s %(levelname)s %(message)s")
+    #logging.debug ("Dumping raw un-dedispersed for checking")
+    #################################
+    if not os.path.exists (args.outdir):
+        os.mkdir (args.outdir)
     #################################
     # subband logic
-    if args.lsb and args.usb:
-        raise ValueError (" cannot specify both subbands ")
-    if not (args.lsb or args.usb):
-        raise ValueError (" must specify atleast one subband ")
+    LSB     = False
+    USB     = False
+    if args.sideband == 'l' or args.sideband == 'lower':
+        LSB = True
+    else:
+        USB = True
+    # feed logic
+    CIRC    = False
+    LIN     = False
+    if args.feed == 'c' or args.feed == 'cir':
+        CIRC = True
+    else:
+        LIN  = True
     #################################
     nbin = args.nbins
     nch  = args.nchans
@@ -111,7 +124,7 @@ if __name__ == "__main__":
     ### read freq/tsamp
     band = get_band  (baw)
     tsamp= get_tsamp (band, nch)
-    freqs= get_freqs (band, nch, lsb=args.lsb, usb=args.usb)
+    freqs= get_freqs (band, nch, lsb=LSB, usb=USB)
     logging.info (f"Raw band           = {band}")
     logging.debug (f"Tsamp             = {tsamp}")
     logging.debug (f"Frequencies       = {freqs[0]:.3f} ... {freqs[-1]:.3f}")
@@ -130,6 +143,7 @@ if __name__ == "__main__":
     logging.debug (f"Delays            = {f_delays[0]:d} ... {f_delays[-1]:d}")
     #################################
     ## read toa csv
+    #toa  = pd.read_csv ("all_csv/" +args.toa)
     toa  = pd.read_csv (args.toa)
     logging.debug (f"TOA file           = {args.toa}")
     it   = tqdm.tqdm (toa.index, unit='toa', desc='Snippet')
@@ -147,6 +161,7 @@ if __name__ == "__main__":
         pt_s = pt.to (au.second).value
         if pt_s < 0 or pt_s > scan_time:
             logging.warning (f" burst not in scan index={i:d} S/N={sn:.1f} time={pt_s:.3f} mjd={bmj:.10f}")
+            continue
 
         ## output file
         ofile  = os.path.join (args.outdir, ARFILE.format(tmjd=bmj, freq=ref_freq, source=args.source, sn=sn))
@@ -158,20 +173,41 @@ if __name__ == "__main__":
         ##
         pkg          = fb[start_sample:(start_sample+take_slice)]
 
+        #print (" removing Stokes-I 0dm")
+        #ii           = np.mean (np.float32 (pkg[...,0]) + np.float32 (pkg[...,2]), 1)
+        #pkg          = np.float64 (pkg)
+        #pkg          -= ii[:,np.newaxis,np.newaxis]
+
+        #np.savez ("why_0dm_large_rfi_sn20.71_burst.npz", pkg=pkg)
+        #adfad
+
         ## dd
         ddpkg        = dedisperser (pkg, f_delays)
 
         ## coherence
         ## XXX SB: not using `Redigitze` class since
         ## we are writing as int16
-        coh_pkg[...,0]    = ddpkg[...,0]
-        coh_pkg[...,1]    = ddpkg[...,2]
-        coh_pkg[...,2]    = ddpkg[...,1]
-        coh_pkg[...,3]    = ddpkg[...,3]
+        """
+        in circular case, the CRCI swapping only causes a flip in the PA (only a sign flip)
+        in linear case, the CRCI swap is more costly. 
+        because then we might do RM (Q,V) fitting instead of RM (Q,U)
+
+        in case of linear, we go with case(b) see redigitize.py
+        """
+        if CIRC:
+            coh_pkg[...,0]    = ddpkg[...,0]
+            coh_pkg[...,1]    = ddpkg[...,2]
+            coh_pkg[...,2]    = ddpkg[...,1]
+            coh_pkg[...,3]    = ddpkg[...,3]
+        elif LIN:
+            coh_pkg[...,0]    = ddpkg[...,2]
+            coh_pkg[...,1]    = ddpkg[...,0]
+            coh_pkg[...,2]    = ddpkg[...,1]
+            coh_pkg[...,3]    = ddpkg[...,3]
 
         ## setup ar
         # Fill in the ObsInfo class
-        d = BaseObsInfo (utime_start.mjd, 'snippet')
+        d = BaseObsInfo (utime_start.mjd, 'snippet', circular=CIRC, linear=LIN)
         d.fill_freq_info (nch, band['bw'], freqs)
         d.fill_source_info (args.source, RAD[args.source], DECD[args.source])
         d.fill_beam_info (args.beam_size)
@@ -205,9 +241,10 @@ if __name__ == "__main__":
 
         dat_wts           = np.ones((n_subints, nch), dtype=np.float32)
         # XXX 2021-11-30 SB: flagging top 20 and bottom 10 channels by default
-        dat_wts[0,1044:1054] = 0
-        dat_wts[0,:20]    = 0
-        dat_wts[0,-10:]   = 0
+        #dat_wts[0,1044:1054] = 0
+        #dat_wts[0,:20]    = 0
+        #dat_wts[0,-10:]   = 0
+        # XXX 2023-03-15 not flagging anything
         """
         2021-11-30 SB: the ordering in fold-mode and search-mode is different
         make note
