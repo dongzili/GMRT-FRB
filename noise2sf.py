@@ -44,12 +44,14 @@ def get_args ():
     agp = argparse.ArgumentParser ("noise2sf", description="Zips uGMRT noise diode raw to search-mode PSRFITS", epilog="GMRT-FRB polarization pipeline")
     add = agp.add_argument
     add ('-c,--nchan', help='Number of channels', type=int, required=True, dest='nchans')
-    add ('-b,--bit-shift', help='Bitshift', type=int, dest='bitshift', default=6)
-    add ('--lsb', help='Lower subband', action='store_true', dest='lsb')
-    add ('--usb', help='Upper subband', action='store_true', dest='usb')
+    add ('-b,--sb', help='Sideband',choices=['l','u','lower','upper'], dest='sideband', required=True)
+    add ('-f,--feed', help='Feed',choices=['cir','lin','c','l'], dest='feed', required=True)
     add ('--gulp', help='Samples in a block', dest='gulp', default=2048, type=int)
+    #add ('-b,--bandwidth', help='Bandwidth', dest='bw', required=True, type=float, choices=[100,200,400])
+    #add ('-f,--freq', help='Frequency edge', dest='fedge', required=True, type=float, choices=[550, 1460, 1260, 1200])
+    #add ('-i,--fftint', help='FFT integration', dest='fftint', required=True, type=int, choices=[8,16,32])
     add ('--beam-size', help='Beam size in arcsec', dest='beam_size', default=4, type=float)
-    add ('-s', '--source', help='Source', choices=MISC_SOURCES, required=True)
+    add ('-s', '--source', help='Source', choices=SOURCES, required=True)
     add ('-O', '--outdir', help='Output directory', default="./")
     add ('-d','--debug', action='store_const', const=logging.DEBUG, dest='loglevel')
     add ('-v','--verbose', action='store_const', const=logging.INFO, dest='loglevel')
@@ -61,11 +63,26 @@ if __name__ == "__main__":
     args = get_args ()
     logging.basicConfig (level=args.loglevel, format="%(asctime)s %(levelname)s %(message)s")
     #################################
+    if not os.path.exists (args.outdir):
+        os.mkdir (args.outdir)
+    #################################
     # subband logic
-    if args.lsb and args.usb:
-        raise ValueError (" cannot specify both subbands ")
-    if not (args.lsb or args.usb):
-        raise ValueError (" must specify atleast one subband ")
+    LSB     = False
+    USB     = False
+    if args.sideband == 'l' or args.sideband == 'lower':
+        LSB = True
+    else:
+        USB = True
+    # feed logic
+    feed    = ''
+    CIRC    = False
+    LIN     = False
+    if args.feed == 'c' or args.feed == 'cir':
+        CIRC = True
+        feed = 'CIRC'
+    else:
+        LIN  = True
+        feed = 'LIN'
     #################################
     GULP = args.gulp
     hGULP= GULP // 2
@@ -83,6 +100,9 @@ if __name__ == "__main__":
     logging.info (f"Raw OFF file           = {raw_of}")
     logging.info (f"Raw OFF header file    = {hdr_of}")
     #### band check
+    """
+    this is skipped because now the input is given form CL and not parsed form the file name
+    """
     band_on = get_band (baw_on)
     band_of = get_band (baw_of)
     if band_on['fftint'] != band_of['fftint']:
@@ -91,9 +111,14 @@ if __name__ == "__main__":
         raise ValueError ("Bandwidth not same")
     if band_on['fedge'] != band_of['fedge']:
         raise ValueError ("Band not same")
+    #band_on = dict (beam='on', fedge=args.fedge, bw=args.bw, fftint=args.fftint)
+    #band_of = dict (beam='of', fedge=args.fedge, bw=args.bw, fftint=args.fftint)
     ### read time
     rawt_on = read_hdr (hdr_on)
     rawt_of = read_hdr (hdr_of)
+    #logging.warning (f" setting random MJD")
+    #rawt_on  = at.Time (59243.00, format='mjd')
+    #rawt_of  = at.Time (59243.01, format='mjd')
     logging.info (f"Raw ON MJD            = {rawt_on.mjd:.5f}")
     logging.info (f"Raw OFF MJD           = {rawt_of.mjd:.5f}")
     ### read raw
@@ -106,10 +131,10 @@ if __name__ == "__main__":
     ### read freq/tsamp
     band = band_on
     tsamp= get_tsamp (band, nch)
-    freqs= get_freqs (band, nch, lsb=args.lsb, usb=args.usb)
+    freqs= get_freqs (band, nch, lsb=LSB, usb=USB)
     logging.debug (f"Frequencies       = {freqs[0]:.3f} ... {freqs[-1]:.3f}")
     #################################
-    rdi        = Redigitize (GULP, nch, npl)
+    rdi        = Redigitize (GULP, nch, npl, feed)
     #################################
     nsamples   = min (fb_on.shape[0],fb_of.shape[0])
     nrows      = nsamples // GULP
@@ -131,7 +156,7 @@ if __name__ == "__main__":
     logging.info (f"Output search-mode psrfits = {outfile}")
 
     # Fill in the ObsInfo class
-    d = BaseObsInfo (rawt_of.mjd, 'cal')
+    d = BaseObsInfo (rawt_of.mjd, 'cal', circular=CIRC, linear=LIN)
     d.fill_freq_info (nch, band['bw'], freqs)
     d.fill_source_info (args.source, RAD[args.source], DECD[args.source])
     d.fill_beam_info (args.beam_size)
@@ -239,6 +264,7 @@ if __name__ == "__main__":
         rdat[:hGULP] = pkg_on[:]
         rdat[hGULP:] = pkg_of[:]
         sdat[:]     = np.roll (rdat, 768, axis=0)
+        #sdat[:]     = np.roll (rdat, 0, axis=0)
 
         ###
         ## data wrangling
