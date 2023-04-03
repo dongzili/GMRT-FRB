@@ -7,6 +7,7 @@ Major change(s):
     Only support for full stokes data
     Output PSRFITS is search-mode
     `nbits` is 8 since uGMRT raw is 16bit
+    feed information now provided as input
 
 Original Source: https://github.com/rwharton/fil2psrfits
 Copied and modified from: https://github.com/thepetabyteproject/your/blob/master/your/formats/fitswriter.py
@@ -41,8 +42,8 @@ def get_args ():
     agp = argparse.ArgumentParser ("raw2sf", description="Converts uGMRT raw to search-mode PSRFITS", epilog="GMRT-FRB polarization pipeline")
     add = agp.add_argument
     add ('-c,--nchan', help='Number of channels', type=int, required=True, dest='nchans')
-    add ('--lsb', help='Lower subband', action='store_true', dest='lsb')
-    add ('--usb', help='Upper subband', action='store_true', dest='usb')
+    add ('-s,--sb', help='Sideband',choices=['l','u','lower','upper'], dest='sideband', required=True)
+    add ('-f,--feed', help='Feed',choices=['cir','lin','c','l'], dest='feed', required=True)
     add ('--gulp', help='Samples in a block', dest='gulp', default=2048, type=int)
     add ('--beam-size', help='Beam size in arcsec', dest='beam_size', default=4, type=float)
     add ('-O', '--outdir', help='Output directory', default="./")
@@ -55,11 +56,26 @@ if __name__ == "__main__":
     args = get_args ()
     logging.basicConfig (level=args.loglevel, format="%(asctime)s %(levelname)s %(message)s")
     #################################
+    if not os.path.exists (args.outdir):
+        os.mkdir (args.outdir)
+    #################################
     # subband logic
-    if args.lsb and args.usb:
-        raise ValueError (" cannot specify both subbands ")
-    if not (args.lsb or args.usb):
-        raise ValueError (" must specify atleast one subband ")
+    LSB     = False
+    USB     = False
+    if args.sideband == 'l' or args.sideband == 'lower':
+        LSB = True
+    else:
+        USB = True
+    # feed logic
+    CIRC    = False
+    LIN     = False
+    feed    = ''
+    if args.feed == 'c' or args.feed == 'cir':
+        CIRC = True
+        feed = 'CIRC'
+    else:
+        LIN  = True
+        feed = 'LIN'
     #################################
     GULP = args.gulp
     nch  = args.nchans
@@ -85,12 +101,12 @@ if __name__ == "__main__":
     ### read freq/tsamp
     band = get_band  (baw)
     tsamp= get_tsamp (band, nch)
-    freqs= get_freqs (band, nch, lsb=args.lsb, usb=args.usb)
+    freqs= get_freqs (band, nch, lsb=LSB, usb=USB)
     logging.info (f"Raw band           = {band}")
     logging.debug (f"Tsamp             = {tsamp}")
     logging.debug (f"Frequencies       = {freqs[0]:.3f} ... {freqs[-1]:.3f}")
     #################################
-    rdi        = Redigitize (GULP, nch, npl)
+    rdi        = Redigitize (GULP, nch, npl, feed)
     #################################
     nsamples   = fb.shape[0]
     nrows      = nsamples // GULP
@@ -112,7 +128,7 @@ if __name__ == "__main__":
     logging.info (f"Output search-mode psrfits = {outfile}")
 
     # Fill in the ObsInfo class
-    d = BaseObsInfo (rawt.mjd, 'search')
+    d = BaseObsInfo (rawt.mjd, 'search', circular=CIRC, linear=LIN)
     d.fill_freq_info (nch, band['bw'], freqs)
     d.fill_source_info (src, RAD[src], DECD[src])
     d.fill_beam_info (args.beam_size)
@@ -144,8 +160,8 @@ if __name__ == "__main__":
     # XXX 2022-02-18 SB: some more flagging
     dat_wts[:,:50]    = 0
     dat_wts[:,-10:]   = 0
-    dat_wts[:,942:955] = 0
-    dat_wts[:,1044:1054] = 0
+    #dat_wts[:,942:955] = 0
+    #dat_wts[:,1044:1054] = 0
     dat_offs          = np.zeros((nrows,nch,npl),dtype=np.float32)
     dat_scl           = np.ones((nrows,nch,npl),dtype=np.float32)
     # dat               = np.zeros((n_subints, row_size), dtype=np.uint8)
