@@ -12,12 +12,14 @@ class Redigitize:
 
     Direct re-scaling into [0, ??] where ?? is <bitdepth>::max
     """
-    def __init__ (self, gulp, nchans, npol, odtype=np.uint8):
+    def __init__ (self, gulp, nchans, npol, feed, odtype=np.uint8):
         """
         Args
             gulp: int
             nchans: int
                 Sets the work array size
+            feed: str
+                Can only be 'circ' or 'lin'
         """
         ## output dtype
         if odtype not in (np.uint8, np.uint16):
@@ -50,6 +52,11 @@ class Redigitize:
         self.scales     = np.zeros ((1, self.nchans, self.npol), dtype=np.float32)
         self.means      = np.zeros ((1, self.nchans, self.npol), dtype=np.float32)
 
+        ## set feed
+        self.feed       = feed.upper()
+        if self.feed not in ['CIRC', 'LIN']:
+            raise ValueError("Feed argument not understood = {self.feed}")
+
     def _reset (self):
         """resets the arrays"""
         self.dat_scl[:]   = 0.
@@ -73,23 +80,54 @@ class Redigitize:
         ##
         ## stokes computation
         ## see https://arxiv.org/pdf/2004.08542.pdf
-        ## XXX RR, RL*, LL, R*L
-        #self.sdat[...,0] = gfb[...,0] + gfb[...,2]
-        #self.sdat[...,1] = -gfb[...,1] - gfb[...,3]
-        #self.sdat[...,2] = gfb[...,1] - gfb[...,3]
-        #self.sdat[...,3] = gfb[...,2] - gfb[...,0]
-        ## 2021-11-24 SB: see discussion in POL_TYPE in obsinfo
         ## XXX AABBCRCI === RR,LL,RL*,R*L
-        self.sdat[...,0] = gfb[...,0]
-        self.sdat[...,1] = gfb[...,2]
-        self.sdat[...,2] = gfb[...,1]
-        self.sdat[...,3] = gfb[...,3]
-        ## POL_TYPE = "IVQU" circular basis
-        #self.sdat[...,0] = gfb[...,0] + gfb[...,2]
-        #self.sdat[...,1] = gfb[...,2] - gfb[...,0]
-        #self.sdat[...,2] = -gfb[...,1] - gfb[...,3]
-        #self.sdat[...,3] = gfb[...,1] - gfb[...,3]
+        #self.sdat[...,0] = gfb[...,0]
+        #self.sdat[...,1] = gfb[...,2]
+        #self.sdat[...,2] = gfb[...,1]
+        #self.sdat[...,3] = gfb[...,3]
+        ## XXX
+        ## 20221015: Linear feed J0139.RM sign is flipped
+        ## deshalb flipping autocoherence products
+        ## 20230306: need to logic on feed
+        if self.feed == 'CIRC':
+            self.sdat[...,0] = gfb[...,0]
+            self.sdat[...,1] = gfb[...,2]
+            self.sdat[...,2] = gfb[...,1]
+            self.sdat[...,3] = gfb[...,3]
+        elif self.feed == 'LIN':
+        ## do we need to swap, it seems like we don't have to
+        ## 20230306^
+        ## 20230309: we doing cases
+        ## in case of J0139 psr scan
+        ## ## case(a,c) produce RM with wrong sign
+        ## ## case(b,d) produce RM with right sign
+        ## in case of 3C48_NGON pacv DIFF_PHASE
+        ## ## case(a,b) produce negative delay
+        ## ## case(c,d) produce positive delay
+        ## 20230313 we going with case(b)
+        ## case(a)
+        #    self.sdat[...,0] = gfb[...,0]
+        #    self.sdat[...,1] = gfb[...,2]
+        #    self.sdat[...,2] = gfb[...,1]
+        #    self.sdat[...,3] = gfb[...,3]
+        ## case(b)
+            self.sdat[...,0] = gfb[...,2]
+            self.sdat[...,1] = gfb[...,0]
+            self.sdat[...,2] = gfb[...,1]
+            self.sdat[...,3] = gfb[...,3]
+        ## case(c)
+        #    self.sdat[...,0] = gfb[...,0]
+        #    self.sdat[...,1] = gfb[...,2]
+        #    self.sdat[...,2] = gfb[...,3]
+        #    self.sdat[...,3] = gfb[...,1]
+        ## case(d)
+        #    self.sdat[...,0] = gfb[...,2]
+        #    self.sdat[...,1] = gfb[...,0]
+        #    self.sdat[...,2] = gfb[...,3]
+        #    self.sdat[...,3] = gfb[...,1]
 
+        ##
+        ## 20230314: did i screw up this scale affects?
 
         ##
         ## min, max
@@ -97,7 +135,8 @@ class Redigitize:
         self.maxs[0]     = self.sdat.max (0)
         #### scales, means
         self.scales[0]   = (self.maxs - self.mins) / (self.omax - self.omin)
-        self.means[0]    = self.mins - (self.scales * self.omin)
+        self.means[0]    = self.mins
+        #self.means[0]    = self.mins - (self.scales * self.omin)
         ## get "X"
         ### subtract means
         self.sdat        -= self.means
@@ -132,12 +171,17 @@ class Redigitize:
 
 if __name__ == "__main__":
     print ()
-    dd   = np.random.randint (0, 32700, size=(1280, 64, 4), dtype=np.int16)
+    dd   = np.random.randint (0, 32700, size=(1, 4, 4), dtype=np.int16)
     ##
-    rdi  = Redigitize (*dd.shape, odtype=np.uint8)
+    rdi  = Redigitize (*dd.shape, 'lin', odtype=np.uint8,)
     rdi (dd)
+    uu   = ( (rdi.dat*rdi.dat_scl) + rdi.dat_offs )
+    #uu   = np.swapaxes ( uu, 2, 1 )
     ##
-    print (rdi.dat.mean(0))
+    mse  = np.mean ( np.power ( dd - uu, 2 ) )
+    print (f" mse={mse:.3f}")
+    print (dd, uu, sep='\n')
+    #print (rdi.dat.mean(0))
     #print (rdi.dat.std(0))
 
 
