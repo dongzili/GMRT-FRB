@@ -15,11 +15,13 @@ import astropy.coordinates as asc
 
 from astropy.io import fits
 
-__all__ = ['SNIP_SOURCES', 'MISC_SOURCES', 'RAD', 'DECD', 'DMD', 'BaseObsInfo', 'get_band', 'read_hdr', 'get_freqs', 'get_tsamp']
+import warnings
+
+__all__ = ['SOURCES','SNIP_SOURCES', 'MISC_SOURCES', 'RAD', 'DECD', 'DMD', 'BaseObsInfo', 'get_band', 'read_hdr', 'get_freqs', 'get_tsamp']
 
 ###################################################
 SNIP_SOURCES  =  ['R3', 'R67']
-MISC_SOURCES  =  ['B0329+54', '3C48', '3C147', '3C138', 'J0139+5814']
+MISC_SOURCES  =  ['B0329+54', '3C48', '3C147', '3C138', 'J0139+5814', '0217+738']
 SOURCES  =  SNIP_SOURCES + MISC_SOURCES
 
 RAD      =  dict (R3=29.50312583, R67=77.01525833)
@@ -37,6 +39,8 @@ DECD['3C138']    = 16.5907806
 RAD['J0139+5814']= 24.832250
 DECD['J0139+5814']= 58.242172
 DMD['J0139+5814']= 73.81141
+RAD['0217+738']     = 34.882245
+DECD['0217+738']    = 73.9229
 ###################################################
 EDTYPE = np.float32
 MODES  = ['search', 'snippet', 'cal']
@@ -44,7 +48,11 @@ MDtype = {'search':'SEARCH', 'snippet':'PSR', 'cal':'CAL'}
 MDnbits= {'search':8, 'snippet':16, 'cal':8}
 ###################################################
 def get_band (f):
-    """gets beam/freq/fftint info from filename"""
+    """gets beam/freq/fftint info from filename
+       obsolete --> now reading from the arguments
+    """
+    #raise RuntimeError ("this is deprecated")
+    #print (" why did i make this obsolte")
     fdot   = f.split('.')
     ss     = fdot[0].split('_')
     ret    = dict (beam=ss[-5], fedge=float(ss[-4]), bw=float(ss[-3]), fftint=int(ss[-2]))
@@ -75,6 +83,7 @@ DATE_FMT = "Date: %d:%m:%Y"
 
 def read_hdr(f):
     """ Reads HDR file and returns a datetime object"""
+    raise IOError("do not use this=datetime dateutil")
     with open (f, 'r') as ff:
         hdr = [a.strip() for a in ff.readlines()]
         hdr = filter(lambda x : not x.startswith ('#'), hdr)
@@ -87,6 +96,23 @@ def read_hdr(f):
             date = dt.datetime.strptime (h, DATE_FMT)
     ret = dt.datetime (date.year, date.month, date.day, ist.hour, ist.minute, ist.second, ist.microsecond, tzinfo=tz.gettz('Asia/Calcutta'))
     return at.Time (ret)
+#####
+
+def read_hdr(f):
+    """ Reads HDR file and returns a datetime object"""
+    with open (f, 'r') as ff:
+        hdr = [a.strip() for a in ff.readlines()]
+        hdr = filter(lambda x : not x.startswith ('#'), hdr)
+    ist, date = None,None
+    for h in hdr:
+        if h.startswith ("IST"):
+            ist = dt.datetime.strptime (h[:-3], TIME_FMT)
+                # slicing at the end because we only get microsecond precision
+        elif h.startswith ("Date"):
+            date = dt.datetime.strptime (h, DATE_FMT)
+    ret = at.Time ( dt.datetime (date.year, date.month, date.day, ist.hour, ist.minute, ist.second, ist.microsecond) )
+    ist_h  = 5.5 * au.hour
+    return at.Time (ret) - ist_h
 ###################################################
 class BaseObsInfo(object):
     """
@@ -95,7 +121,7 @@ class BaseObsInfo(object):
     - snippet-mode psrfits
     """
 
-    def __init__(self, mjd, mode):
+    def __init__(self, mjd, mode, circular=False, linear=False):
         if mode not in MODES:
             raise ValueError ("mode not understood")
 
@@ -104,6 +130,14 @@ class BaseObsInfo(object):
         self.observer      = "LGM"
         self.proj_id       = "GMRT-FRB"
         self.obs_date      = ""
+
+        ## feeds
+        self.circular      = circular
+        self.linear        = linear
+        if self.circular and self.linear:
+            raise RuntimeError ("feeds are ambigous")
+        if not (self.circular or self.linear):
+            raise RuntimeError ("feed info not provided")
 
         #### freq info
         self.freqs         = None
@@ -185,7 +219,8 @@ class BaseObsInfo(object):
         self.dec_str  = f"{int(dec_dms[0]):02d}:{np.abs(int(dec_dms[1])):02d}:{np.abs(dec_dms[2]):07.4f}"
 
     def fill_beam_info(self, beam_size):
-        """ currently only support circular beams """
+        """ beam size??? """
+        warnings.warn (" beamsize is default and might be wrong", FutureWarning)
         self.bmaj_deg  = beam_size / 3600.0
         self.bmin_deg  = beam_size / 3600.0
         self.bpa_deg   = 0.0
@@ -271,15 +306,27 @@ class BaseObsInfo(object):
             "Rx and feed ID                               ",
         )
         p_hdr["NRCVR"] = (2, "Number of receiver polarisation channels     ")
-        p_hdr["FD_POLN"] = ("CIRC", "LIN or CIRC                                  ")
-        p_hdr["FD_HAND"] = (+1, "+/- 1. +1 is LIN:A=X,B=Y, CIRC:A=L,B=R (I)   ")
+        if self.circular:
+            p_hdr["FD_POLN"] = ("CIRC", "LIN or CIRC                                  ")
+            p_hdr["FD_HAND"] = (+1, "+/- 1. +1 is LIN:A=X,B=Y, CIRC:A=L,B=R (I)   ")
+        if self.linear:
+            p_hdr["FD_POLN"] = ("LIN", "LIN or CIRC                                  ")
+            p_hdr["FD_HAND"] = (+1, "+/- 1. +1 is LIN:A=X,B=Y, CIRC:A=L,B=R (I)   ")
 
         ### XXX
         """
             WvS+?? psrchive+polcal paper says FD_SANG for circular feeds should be 0deg
             FD_HAND=+1 for circular feeds
+
+            For linear feeds if the receiver is in prime-focus, FD_HAND=+1
+            for uGMRT, it is the case
         """
-        p_hdr["FD_SANG"] = (0.0, "[deg] FA of E vect for equal sigma in A&B (E)  ")
+        if self.linear:
+            p_hdr["FD_SANG"] = (45.0, "[deg] FA of E vect for equal sigma in A&B (E)  ")
+            warnings.warn (" why LINEAR.FD_SANG=45deg", UserWarning)
+        if self.circular:
+            p_hdr["FD_SANG"] = (0.0, "[deg] FA of E vect for equal sigma in A&B (E)  ")
+        ### FD_SANG needs to be 45deg for linear feeds
         p_hdr["FD_XYPH"] = (0.0, "[deg] Phase of A^* B for injected cal (E)    ")
 
         p_hdr["BACKEND"]  = ("uGMRT", "Backend ID                                   ")
@@ -288,6 +335,7 @@ class BaseObsInfo(object):
         ## BE_PHASE affects StokesV so check
         ## XXX all usb's so it should be +ive???
         p_hdr["BE_PHASE"] = (+1, "0/+1/-1 BE cross-phase:0 unknown,+/-1 std/rev")
+        warnings.warn (" BE_PHASE is still ambigous", UserWarning)
         ## in some uGMRT bands, the top subband is taken and in some the lower subband is
         p_hdr["BE_DCC"]   = (0, "0/1 BE downconversion conjugation corrected  ")
 
