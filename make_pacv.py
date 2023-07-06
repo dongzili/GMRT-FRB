@@ -1,10 +1,12 @@
 """
 make_pacv
 
-combine calibration solutions and prepare a pacv file
+write pacv
 """
 import os
 import json
+
+import warnings
 
 import numpy as np
 
@@ -15,23 +17,22 @@ import astropy.time  as at
 import astropy.units as au
 import astropy.coordinates as asc
 
-import logging
-
 from astropy.io import fits
 
+from my_pacv import read_pkl, MyPACV
+
 ################################
-logger = logging.getLogger (__name__)
+RAD,DECD         = dict(),dict()
+RAD['3C138']     = 79.5687917
+DECD['3C138']    = 16.5907806
 
 def get_args ():
     import argparse
     agp = argparse.ArgumentParser ("make_pacv", description="Makes a pacv calibration solution file", epilog="GMRT-FRB polarization pipeline")
     add = agp.add_argument
-    add ('gdg', help='Gain/diff. gain solution JSON (acquired from measure_gain_dgain.py)',)
-    add ('delay', help='Delay solution JSON (acquired from measure_delay7.py)',)
-    
-    add ('-O', '--outdir', help='Output directory', default="./")
-    add ('-d','--debug', action='store_const', const=logging.DEBUG, dest='loglevel')
-    add ('-v','--verbose', action='store_const', const=logging.INFO, dest='loglevel')
+    add ('pkl', help='Pickle file (output of make_np.py)',)
+    add ('-O', '--outdir', help='Output directory', default="./", dest='odir')
+    add ('-v','--verbose', action='store_true', dest='v')
     return agp.parse_args ()
 
 class BasePacvInfo(object):
@@ -360,59 +361,67 @@ class BasePacvInfo(object):
 
 if __name__ == "__main__":
     args = get_args ()
-    logging.basicConfig (level=args.loglevel, format="%(asctime)s %(levelname)s %(message)s")
+    #######################
+    FILE_UNCAL  = args.pkl
+    base,_      = os.path.splitext ( os.path.basename ( FILE_UNCAL ) )
+    undir       = os.path.join ( "mypacv_un", base )
+    dpfile      = os.path.join ( args.odir, base + ".diagplot.png" )
+    spfile      = os.path.join ( args.odir, base + ".solplot.png" )
+    ofile       = base + ".mycal.pacv"
+    outfile   = os.path.join ( args.odir, ofile  )
+    ## read
+    pkg, freq, sc    = read_pkl ( FILE_UNCAL )
+    npar        = 3 # SingleAxis model
+    nchan       = freq.size
+    ## ON phase solve
+    ## ON-phase is more than 60% of the maximum
+    pp          = sc[0].mean(0)
+    mask        = pp >= (0.60 * pp.max())
+    ff          = sc[...,mask].mean(-1) - sc[...,~mask].mean(-1)
+    off_std     = sc[...,~mask].std(-1)
+    #######################
+    feed        = ''
+    if pkg['basis'] == 'Circular':
+        feed = 'CIRC'
+    elif pkg['basis'] == 'Linear':
+        feed = 'LIN'
+    else:
+        raise RuntimeError (" Basis not understood basis=",pkg['basis'])
+    caler       = MyPACV ( feed, freq, ff, off_std )
+    caler.fit_dphase ( undir )
+    caler.diag_plot ( dpfile )
+    caler.sol_plot  ( spfile )
     #################################
-    with open (args.gdg, 'r') as f:
-        gdg   = json.load ( f )
-
-    with open (args.delay, 'r') as f:
-        delay = json.load ( f )
-    #################################
-    delay_ns  = delay['delay_ns']
-    delayerr_ns = delay['delayerr_ns']
-    #################################
-    faxis     = gdg['freq_axis']
-    nchan     = faxis['nchan']
-    npar      = 3
-    dat_freq  = np.array (gdg['full_freq_list'], dtype=np.float32).reshape ((1, nchan))
-    dat_wts   = np.array (gdg['freq_mask'], dtype=np.float32).reshape ((1, nchan))
+    dat_freq  = np.array (freq, dtype=np.float32).reshape ((1, nchan))
+    ## need the logical not for dat_wts
+    mask      = np.logical_not ( freq.mask )
+    dat_wts   = np.array (mask, dtype=np.float32).reshape ((1, nchan))
 
     data      = np.zeros ((1, nchan, npar), dtype=np.float32)
     dataerr   = np.zeros ((1, nchan, npar), dtype=np.float32)
-    mask      = np.array (gdg['freq_mask'], dtype=bool)
-    #################################
-    data[0, mask, 0] = gdg['gain']
-    data[0, mask, 1] = gdg['dgain']
-    dataerr[0, mask, 0]  = gdg['gainerr']
-    dataerr[0, mask, 1]  = gdg['dgainerr']
-    #################################
-    # print (f" Delay = {delay_ns:.6f} +- {delayerr_ns:.6f} ns")
-    delay_f          = np.mod (-dat_freq * 1E-3 * delay_ns * np.pi, np.pi) - (0.5 * np.pi)
-    delayerr_f       = np.mod (dat_freq * 1E-3 * delayerr_ns * np.pi, np.pi)
-    kik              = np.array ([23, 33, 232, 923])
-    # print (f" whylarge: {delay_f[0,kik]}, +- {delayerr_f[0,kik]}")
-    data[0, mask, 2] = delay_f[0,mask]
-    dataerr[0, mask, 2] = delayerr_f[0,mask]/100
-    #################################
-    ## using delay time measurement to keep trach of epoch
-    gain_mjd  = gdg['obstime']
-    delay_mjd = delay['obstime']
-    gap_mjd   =  abs (gain_mjd - delay_mjd )
-    if gap_mjd > 2:
-        raise RuntimeError (" Delays and gains older than two days")
-    dt        = at.Time ( delay_mjd, format='mjd' ).strftime ("%Y%m%d")
-    outfile   = os.path.join ( args.outdir, f"mycal_{dt}.pacv" )
-    pinfo     = BasePacvInfo ( delay['obstime'] )
+    #####
+    ## invert here
+    ## DGAIN sign to be flipped
+    ## v sensitive to AABBCRCI definition
+    data[0, ..., 0] = caler.gain
+    data[0, ..., 1] = caler.dgain
+    data[0, ..., 2] = caler.get_line_wrap ( caler.dphase_lpar, hin=True)
+    dataerr[0, ..., 0]  = caler.gainerr
+    dataerr[0, ..., 1]  = caler.dgainerr
+    dataerr[0, ..., 2]  = caler.dphaseerr
+    #####
+    dt        = at.Time ( pkg['mjd'], format='mjd' ).strftime ("%Y%m%d")
+    mjd       = int ( pkg['mjd'] )
+    pinfo     = BasePacvInfo ( pkg['mjd'] )
 
     ##
-    pinfo.fill_freq_info ( faxis['nchan'], faxis['fbw'], gdg['full_freq_list'] )
+    pinfo.fill_freq_info ( pkg['nchan'], pkg['fbw'], freq )
     ##
-    pinfo.fill_source_info ( gdg['source'], 0., 0. )
+    pinfo.fill_source_info ( pkg['source'], RAD[pkg['source']], DECD[pkg['source']] )
     pinfo.fill_beam_info ( 0. )
     #################################
     primary_header  = pinfo.fill_primary_header (  )
     primary_hdu     = fits.PrimaryHDU (header=primary_header)
-
     history_hdu     = pinfo.fill_history_table ()
 
     calsol_header   = pinfo.fill_solution_header ()
