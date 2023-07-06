@@ -85,7 +85,7 @@ if __name__ == "__main__":
     if args.odir:
         outfile = os.path.join ( args.odir, bn + ".pkg" )
     else:
-        outfile = split_extension  ( args.file ) + ".pkg"
+        outfile =  args.file + ".pkg"
     ## read file and ranges
     pkg     = read_ar ( args.file, remove_baseline = not args.baseline )
 
@@ -99,6 +99,7 @@ if __name__ == "__main__":
             ran = json.load (f)
     else:
         with open (args.file+".json", 'r') as f:
+        # with open (args.file[:-5]+".calibP.Czap.json", 'r') as f:
             ran = json.load (f)
 
     RET.update ( ran )
