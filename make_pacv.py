@@ -2,11 +2,11 @@
 make_pacv
 
 write pacv
+
+
 """
 import os
 import json
-
-import warnings
 
 import numpy as np
 
@@ -19,7 +19,8 @@ import astropy.coordinates as asc
 
 from astropy.io import fits
 
-from my_pacv import read_pkl, MyPACV
+# from my_pacv import read_pkl, MyPACV
+from circ_pacv import read_pkl, MyPACV
 
 ################################
 RAD,DECD         = dict(),dict()
@@ -114,6 +115,65 @@ class BasePacvInfo(object):
         self.src_name = src_name
         self.ra_str   = f"{int(ra_hms[0]):02d}:{np.abs(int(ra_hms[1])):02d}:{np.abs(ra_hms[2]):07.4f}"
         self.dec_str  = f"{int(dec_dms[0]):02d}:{np.abs(int(dec_dms[1])):02d}:{np.abs(dec_dms[2]):07.4f}"
+
+    def get_parallactic_angle (self, tobs):
+        """ compute parallactic angle """
+        import astroplan as ap
+        import astropy.units as au
+        observer      = ap.Observer ( location=self.el )
+        pal           = observer.parallactic_angle ( tobs, self.sc ).to(au.radian)
+        return pal.value
+
+    def get_position_angle (self):
+        """ compute position angle of the source
+            
+            Perley Butler here
+            in band-4, we do not expect pos-angle to change
+
+           -32 degrees
+
+           This Q/U sign flip
+           There is a sign flip in V
+        """
+        if self.src_name != "3C138":
+            raise RuntimeError ("Source not identified src=",self.src_name)
+        return np.deg2rad ( -32 )
+
+    def get_rotation_measure (self):
+        """ 
+        Does 3C138 have RM?
+
+        Tabara&Inoue say -2.1
+        https://ui.adsabs.harvard.edu/abs/1980A%26AS...39..379T/abstract
+
+        VLBI studies say RM is equivalent to zero
+        https://ui.adsabs.harvard.edu/abs/1995A%26A...299..671D/abstract
+        https://ui.adsabs.harvard.edu/abs/1997A&A...325..493C
+
+        VLA just says take RM to be zero.
+            
+        """
+        if self.src_name != "3C138":
+            raise RuntimeError ("Source not identified src=",self.src_name)
+        return -2.1
+
+    def get_ionospheric_RM (self, tobs, duration=30., nsteps=2):
+        """ uses RMextract """
+        from RMextract.getRM import getRM
+        ###
+        pointing = [ self.sc.ra.radian, self.sc.dec.radian ]
+        gmrt_pos = [self.ant_x, self.ant_y, self.ant_z]
+        time     = tobs.mjd * 86400.0
+        ###
+        ret      = getRM ( 
+            radec=pointing,
+            stat_positions=[gmrt_pos],
+            timestep=nsteps,
+            timerange=[time,time+duration]
+        )
+        ###
+        retrm    = ret['RM']['st1'].mean()
+        return retrm
 
     def fill_beam_info(self, beam_size):
         """ currently only support circular beams """
@@ -361,7 +421,9 @@ class BasePacvInfo(object):
 
 if __name__ == "__main__":
     args = get_args ()
-    #######################
+    ###################################################
+    ### prepare files/filenames
+    ###################################################
     FILE_UNCAL  = args.pkl
     base,_      = os.path.splitext ( os.path.basename ( FILE_UNCAL ) )
     undir       = os.path.join ( "mypacv_un", base )
@@ -369,6 +431,9 @@ if __name__ == "__main__":
     spfile      = os.path.join ( args.odir, base + ".solplot.png" )
     ofile       = base + ".mycal.pacv"
     outfile   = os.path.join ( args.odir, ofile  )
+    ###################################################
+    ### read calibrator file
+    ###################################################
     ## read
     pkg, freq, sc    = read_pkl ( FILE_UNCAL )
     npar        = 3 # SingleAxis model
@@ -378,6 +443,17 @@ if __name__ == "__main__":
     pp          = sc[0].mean(0)
     mask        = pp >= (0.60 * pp.max())
     ff          = sc[...,mask].mean(-1) - sc[...,~mask].mean(-1)
+    #######################
+    ## in case stokes-i (ff[0]) is negative, flag it.
+    ## it should not be expected but if the calibrator scan is that bad
+    ## then yea
+    lz                     = ff[0] <= 0.0
+    if np.any (lz):
+        print (f" ON-OFF Stokes-I is negative, this should not be")
+        freq.mask[lz]      = True
+        sc.mask[:,lz,:]    = True
+        ff.mask[...,lz]    = True
+    #######################
     off_std     = sc[...,~mask].std(-1)
     #######################
     feed        = ''
@@ -387,16 +463,49 @@ if __name__ == "__main__":
         feed = 'LIN'
     else:
         raise RuntimeError (" Basis not understood basis=",pkg['basis'])
-    caler       = MyPACV ( feed, freq, ff, off_std )
-    caler.fit_dphase ( undir )
+    ###################################################
+    ### prepare pacv file
+    ###################################################
+    tobs      = at.Time ( pkg['mjd'], format='mjd' )
+    dt        = tobs.strftime ("%Y%m%d")
+    mjd       = int ( pkg['mjd'] )
+    pinfo     = BasePacvInfo ( pkg['mjd'] )
+    pinfo.fill_freq_info ( pkg['nchan'], pkg['fbw'], freq )
+    ##
+    pinfo.fill_source_info ( pkg['source'], RAD[pkg['source']], DECD[pkg['source']] )
+    pinfo.fill_beam_info ( 0. )
+    #### parallactic angle
+    pal_angle = pinfo.get_parallactic_angle ( tobs )
+    #### position angle
+    pos_angle = pinfo.get_position_angle ()
+    #### Ionospheric RM contribution
+    ionosrm     = pinfo.get_ionospheric_RM ( tobs )
+    #### source RM
+    srcrm       = pinfo.get_rotation_measure () 
+    #### correct for both
+    angle_corr  = pal_angle + pos_angle
+    rm_corr     = ionosrm + srcrm
+    #### logging
+    print (f" Parallactic angle = {np.rad2deg(pal_angle):.3f}")
+    # print (f" Position angle    = {np.rad2deg(pos_angle):.3f}")
+    print (f" Ionospheric RM    = {ionosrm:.3f}")
+    print (f" Source RM         = {srcrm:.3f}")
+    print (f" Correction angle  = {np.rad2deg(angle_corr):.3f}")
+    print (f" Correction RM     = {rm_corr:.3f}")
+    ##################################################
+    ### perform fitting
+    ###################################################
+    caler       = MyPACV ( feed, freq, ff, off_std, angle_corr, rm_corr )
+    caler.fit_dphase ( undir, test=not True )
     caler.diag_plot ( dpfile )
     caler.sol_plot  ( spfile )
-    #################################
+    ##################################################
+    ### write into pacv
+    ###################################################
     dat_freq  = np.array (freq, dtype=np.float32).reshape ((1, nchan))
     ## need the logical not for dat_wts
     mask      = np.logical_not ( freq.mask )
     dat_wts   = np.array (mask, dtype=np.float32).reshape ((1, nchan))
-
     data      = np.zeros ((1, nchan, npar), dtype=np.float32)
     dataerr   = np.zeros ((1, nchan, npar), dtype=np.float32)
     #####
@@ -409,17 +518,9 @@ if __name__ == "__main__":
     dataerr[0, ..., 0]  = caler.gainerr
     dataerr[0, ..., 1]  = caler.dgainerr
     dataerr[0, ..., 2]  = caler.dphaseerr
-    #####
-    dt        = at.Time ( pkg['mjd'], format='mjd' ).strftime ("%Y%m%d")
-    mjd       = int ( pkg['mjd'] )
-    pinfo     = BasePacvInfo ( pkg['mjd'] )
-
-    ##
-    pinfo.fill_freq_info ( pkg['nchan'], pkg['fbw'], freq )
-    ##
-    pinfo.fill_source_info ( pkg['source'], RAD[pkg['source']], DECD[pkg['source']] )
-    pinfo.fill_beam_info ( 0. )
-    #################################
+    ##################################################
+    ### pacv fits header
+    ###################################################
     primary_header  = pinfo.fill_primary_header (  )
     primary_hdu     = fits.PrimaryHDU (header=primary_header)
     history_hdu     = pinfo.fill_history_table ()
