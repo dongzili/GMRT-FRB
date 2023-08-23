@@ -6,6 +6,9 @@ Make a pkg out of it.
 Fit for cable delay, pa, linear-pol-amp
 
 20220922: this works! the delay measurements are sensible
+
+dudeeee, need to compensate for Ionospheric RM and parallactic angle
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaahhhhhhhhhhhhhhh
 """
 import os
 import sys
@@ -102,8 +105,8 @@ class MeasureDelay:
         ####
         m      = amps * self.ifit * np.exp         \
             (                                      \
-                (2j * self.xfit * 1E-3  * dpi) +   \
-                (2j * pa)                          \
+                (1j * self.xfit * 1E-3  * dpi) +   \
+                (1j * pa)                          \
             )
         ####
         yy     = np.append ( np.real (m), np.imag (m) )
@@ -158,8 +161,8 @@ class MeasureDelay:
         """ forward  """
         m      = self.amps * i * np.exp              \
             (                                        \
-                (2j * f * 1E-3  * self.delay_pi) +   \
-                (2j * self.pa)                       \
+                (1j * f * 1E-3  * self.delay_pi) +   \
+                (1j * self.pa)                       \
             )
         return np.real (m), np.imag (m)
 
@@ -168,8 +171,8 @@ class MeasureDelay:
         lr     = (q) + (1.0j*u)
         m      = lr * np.exp                           \
             (                                          \
-                (-2j * f * 1E-3  * self.delay_pi)   +  \
-                (-2j * self.pa)                        \
+                (-1j * f * 1E-3  * self.delay_pi)   +  \
+                (-1j * self.pa)                        \
             )
         return np.real (m), np.imag (m)
 
@@ -228,6 +231,11 @@ if __name__ == "__main__":
     res    = quv.fit_delay ( odir )
     # res    = quv.test_fit_delay  ( odir )
     RET.update ( res )
+    RET['freq']  = freq_list
+    RET['dpi']   = quv.delay_pi
+    RET['bias']  = quv.pa
+    RET['dpierr']   = quv.delay_pierr
+    RET['biaserr']  = quv.paerr
 
     if args.v:
         print (" done")
@@ -251,8 +259,6 @@ if __name__ == "__main__":
     RET['delayerr_ns']   = delay_err
     RET['pa_deg']        = quv.pa
     RET['paerr_deg']     = quv.paerr
-    RET['pa_']           = pa
-    RET['paerr_']        = pae
     RET['amp']           = amps
     RET['amperr']        = amperr
 
