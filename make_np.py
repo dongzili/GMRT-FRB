@@ -45,7 +45,7 @@ def loader (
     with open (ofile, 'wb') as f:
        pkl.dump (dict(
            data=data, wts=wts, fcen=fcen, fbw=fbw, nchan=nchan,
-           mjd=mid_time, src=src,
+           mjd=start_time, src=src, duration=dur,
            basis=basis
        ), f)
 
