@@ -76,6 +76,8 @@ if __name__ == "__main__":
     RET['dgain']   = caler.dgain
     RET['dgainerr'] = caler.dgainerr
     RET.update ( pkg )
+    RET['freq']    = freq
+    RET['freq_mask'] = freq.mask
     ###################################################
     ## writing solution
     ###################################################
