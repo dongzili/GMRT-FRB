@@ -9,7 +9,22 @@ import matplotlib.patches as patches
 
 import astropy.io.fits as aif
 
-from skimage.measure import block_reduce
+try:
+    from skimage.measure import block_reduce
+except ModuleNotFoundError:
+    def block_reduce (x, fac, func=np.mean, cval=0.):
+        ''' doesnt do anything with func/cval  ''' 
+        xs  = x.shape
+        rxs = ()
+        mxs = ()
+        ii  = 1
+        for i, f in zip (xs, fac):
+            rxs += (int(i//f), f)
+            mxs += (ii,)
+            ii  += 2
+        # oxs = (int(xs[0]//fac[0]), int(xs[1]//fac[1]))
+        dx  = x.reshape (rxs).mean (mxs)
+        return dx
 
 def get_args ():
     import argparse as agp
@@ -33,7 +48,7 @@ def dd_process (idd):
 
 def read_ar (f):
     """reads the AR file without using psrchive """
-    f       = aif.open (f)
+    f       = aif.open (f, ignore_missing_simple=True)
     #### get SUBINT table
     names   = [fi.name for fi in f]
     idx     = None
