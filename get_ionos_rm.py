@@ -20,7 +20,7 @@ gmrt = asc.EarthLocation (
 )
 observer = ap.Observer (location=gmrt)
 
-RMS   = {"0329+54":-64.33, "0139+5814":-94.13}
+RMS   = {"0329+54":-64.33, "0139+5814":-94.13, "R3":np.nan}
 
 def get_parallactic_angle ( ra, dec, mjd ):
     """ source coordinates, mjd --> parallactic angle (degree) """
@@ -29,7 +29,7 @@ def get_parallactic_angle ( ra, dec, mjd ):
     pal  = observer.parallactic_angle (atm, atc).to(au.degree).value
     return pal
 
-def get_ionospheric_rm ( ra, dec, mjd, duration=30., nsteps=2, prefix='codg' ):
+def get_ionospheric_rm ( ra, dec, mjd, duration=30., nsteps=2, prefix='uqrg' ):
     """ uses RMextract """
     from RMextract.getRM import getRM
     ###
@@ -50,7 +50,7 @@ def get_ionospheric_rm ( ra, dec, mjd, duration=30., nsteps=2, prefix='codg' ):
         timestep=nsteps,
         timerange=[time,time+duration],
         prefix=prefix,
-        # server="http://cddis.gsfc.nasa.gov"
+        # server="http://cddis.gsfc.nasa.gov/archive/gnss/products/ionex"
         server="ftp://gssc.esa.int/gnss/products/ionex/"
     )
     ###
