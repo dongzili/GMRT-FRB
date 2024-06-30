@@ -28,7 +28,7 @@ class MyPACV:
     """
 
     """
-    def __init__ (self, feed, freq, iquv, err_iquv, pal_angle, ionosrm):
+    def __init__ (self, feed, freq, iquv, err_iquv, ionosrm, pal_angle, pal_angle_reffreq):
         """
 
         feed should be "CIRC"
@@ -38,8 +38,9 @@ class MyPACV:
 
         err_iquv is std-dev of OFF iquv
 
-        pal_angle is the parallactic_angle in radians
         ionosrm is the ionospheric RM contribution
+        pal_angle is the parallactic_angle in radians
+        pal_angle_reffreq is the reference frequency at which pal_angle is corrected
         both of them are corrected for before deriving solution
         """
         self.history = f"Created at {datetime.datetime.utcnow().isoformat()}\n"
@@ -108,6 +109,9 @@ class MyPACV:
         ###################################################
         ## freq is in MHz
         wav2           = np.power ( C / ( self.freq * 1E6 ), 2.0 )
+        #### center the wav2 bc pal_angle measured at a reference
+        rf_wav2        = np.power ( C / ( pal_angle_reffreq * 1E6 ), 2.0 )
+        wav2          -= rf_wav2
         lr             = (self.q) + (1.0j*self.u)
         lr_e           = (self.qerr) + (1.0j*self.uerr)
         ### trial-1: no change!!!
@@ -117,6 +121,10 @@ class MyPACV:
         clr            = lr * np.exp   ( -1.0j * corr_phase )
         clr_e          = lr_e * np.exp ( -1.0j * corr_phase )
         ###
+        ## easy access
+        self.qfit      = clr.real
+        self.ufit      = clr.imag
+        ## easy access
         self.__yfit    = np.concatenate ( (clr.real, clr.imag) )
         self.__yerr    = np.concatenate ( (clr_e.real, clr_e.imag) )
         self.__yerrll  = -0.5 * np.sum ( np.log ( 2.0 * np.pi * self.__yerr**2 ) )
@@ -190,6 +198,11 @@ class MyPACV:
         """
         import ultranest
         import ultranest.stepsampler
+
+        import logging
+        logger      = logging.getLogger ("ultranest")
+        logger.addHandler(logging.NullHandler())
+        logger.setLevel(logging.WARNING)
         ##
         SLICE_DPI   = 0
         SLICE_BIAS  = 1
@@ -243,9 +256,9 @@ class MyPACV:
             isol,isol_err       = self.__un_solver__ ( dir )
         ###
         self.dphase_lpar[:] = isol[:2]
-        self.dphaseerr[:]   = self.__wrap (
+        self.dphaseerr[:]   = np.abs (self.__wrap (
             isol_err[1] + ( isol_err[0]*self.freq*1E-3 )
-        )
+        ))
         # self.sigma          = isol[2]
         self.sigma          = self.sigma_i
         ## history

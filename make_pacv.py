@@ -19,31 +19,26 @@ import astropy.coordinates as asc
 
 from astropy.io import fits
 
-# import logging
-# logging.basicConfig ( level=logging.ERROR, force=True )
-# logger = logging.getLogger()
-# nl = logging.NullHandler ( logging.ERROR )
-# logger.addHandler ( nl )
-
 # from my_pacv import read_pkl, MyPACV
-from circ_pacv import read_pkl, MyPACV as circ_mypacv
-# from lin_pacv import MyPACV as lin_mypacv
-# from lin_pacv_noangle import MyPACV as lin_mypacv
-from lin_pacv_c1 import MyPACV as lin_mypacv
+from circ_pacv import read_pkl, MyPACV
 
 ################################
 RAD,DECD         = dict(),dict()
 RAD['3C138']     = 79.5687917
 DECD['3C138']    = 16.5907806
+RAD['R3']        = 29.50312583
+DECD['R3']       = 65.71675422
+RAD['3C48']      = 24.4220417
+DECD['3C48']     = 33.1597417
 
 def get_args ():
     import argparse
     agp = argparse.ArgumentParser ("make_pacv", description="Makes a pacv calibration solution file", epilog="GMRT-FRB polarization pipeline")
     add = agp.add_argument
     add ('pkl', help='Pickle file (output of make_np.py)',)
-    add ('-z','--zap', help='Zap the channels (comma-separated, start:stop)', dest='zap', default='')
     add ('-O', '--outdir', help='Output directory', default="./", dest='odir')
     add ('-v','--verbose', action='store_true', dest='v')
+    add ('-n','--noise-diode', help='Noise diode', action='store_true', dest='noise_diode')
     return agp.parse_args ()
 
 class BasePacvInfo(object):
@@ -144,10 +139,18 @@ class BasePacvInfo(object):
 
            This Q/U sign flip
            There is a sign flip in V
+
+           also returns the reference frequency
+
+           all this thanks uGMRT Band-4 imaging polcal
         """
-        if self.src_name != "3C138":
+        if self.src_name == "R3":
+            ## probably noise diode scan
+            return np.deg2rad ( 0 ), 551.5625
+        elif self.src_name == "3C138":
+            return np.deg2rad ( -32 ), 551.5625
+        else:
             raise RuntimeError ("Source not identified src=",self.src_name)
-        return np.deg2rad ( -32 )
 
     def get_rotation_measure (self):
         """ 
@@ -163,9 +166,31 @@ class BasePacvInfo(object):
         VLA just says take RM to be zero.
             
         """
-        if self.src_name != "3C138":
+        if self.src_name == "R3":
+            ## probably noise diode scan
+            return 0.0
+        elif self.src_name == "3C138":
+            return -2.1
+        else:
             raise RuntimeError ("Source not identified src=",self.src_name)
-        return -2.1
+
+    def get_ionospheric_RM (self, tobs, duration=30., nsteps=2):
+        """ uses RMextract """
+        from RMextract.getRM import getRM
+        ###
+        pointing = [ self.sc.ra.radian, self.sc.dec.radian ]
+        gmrt_pos = [self.ant_x, self.ant_y, self.ant_z]
+        time     = tobs.mjd * 86400.0
+        ###
+        ret      = getRM ( 
+            radec=pointing,
+            stat_positions=[gmrt_pos],
+            timestep=nsteps,
+            timerange=[time,time+duration]
+        )
+        ###
+        retrm    = ret['RM']['st1'].mean()
+        return retrm
 
     def fill_beam_info(self, beam_size):
         """ currently only support circular beams """
@@ -195,7 +220,7 @@ class BasePacvInfo(object):
         out_str = date_str.split(".")[0]
         return out_str
 
-    def fill_primary_header(self, feed, hand, chan_dm=0.0, scan_len=0):
+    def fill_primary_header(self, chan_dm=0.0, scan_len=0):
         """
         Writes the primary HDU
 
@@ -205,10 +230,6 @@ class BasePacvInfo(object):
             - beam info: BMAJ, BMIN, BPA
             - if CALIBRATION
         """
-        if feed not in ['CIRC','LIN']:
-            raise RuntimeError (f"Feed={feed} not understood")
-        if hand not in [+1, -1]:
-            raise RuntimeError (f"Hand={hand} not understood")
         # XXX need to check
         p_hdr = fits.Header()
         p_hdr["HDRVER"] = (
@@ -240,8 +261,8 @@ class BasePacvInfo(object):
             "Rx and feed ID                               ",
         )
         p_hdr["NRCVR"] = (2, "Number of receiver polarisation channels     ")
-        p_hdr["FD_POLN"] = (feed, "LIN or CIRC                                  ")
-        p_hdr["FD_HAND"] = (hand, "+/- 1. +1 is LIN:A=X,B=Y, CIRC:A=L,B=R (I)   ")
+        p_hdr["FD_POLN"] = ("CIRC", "LIN or CIRC                                  ")
+        p_hdr["FD_HAND"] = (+1, "+/- 1. +1 is LIN:A=X,B=Y, CIRC:A=L,B=R (I)   ")
 
         ### XXX
         """
@@ -397,9 +418,11 @@ class BasePacvInfo(object):
         )
         return polyco_hdu
 
-    def fill_solution_header(self,):
+    def fill_solution_header(self, delay_pi, bias):
         """
         Put solution
+
+        delay_pi and bias are the calibration solution
 
         SINGLE cross coupling method
         """
@@ -413,6 +436,10 @@ class BasePacvInfo(object):
         t_hdr["PAR_0000"]     = ("G", "scalar gain")
         t_hdr["PAR_0001"]     = ("gamma", "differential gain (hyperbolic radians)")
         t_hdr["PAR_0002"]     = ("phi", "differential phase (radians)")
+
+        ## record keeping parameter
+        t_hdr["DELAY_PI"]     = (delay_pi, "DELAY_PI term in the mypacv generation")
+        t_hdr["BIAS"]         = (bias, "BIAS term in the mypacv generation")
         return t_hdr
 
 if __name__ == "__main__":
@@ -449,26 +476,14 @@ if __name__ == "__main__":
         freq.mask[lz]      = True
         sc.mask[:,lz,:]    = True
         ff.mask[...,lz]    = True
-    ## manual zapping
-    for ss in args.zap.split(','):
-        if len (ss) == 0:
-            continue
-        start, stop = ss.split(':')
-        lz  = slice ( int(start), int(stop) )
-        freq.mask[lz]      = True
-        sc.mask[:,lz,:]    = True
-        ff.mask[...,lz]    = True
     #######################
     off_std     = sc[...,~mask].std(-1)
     #######################
     feed        = ''
-    hand        = 0
     if pkg['basis'] == 'Circular':
         feed = 'CIRC'
-        hand = 1
     elif pkg['basis'] == 'Linear':
         feed = 'LIN'
-        hand = 1
     else:
         raise RuntimeError (" Basis not understood basis=",pkg['basis'])
     ###################################################
@@ -482,42 +497,37 @@ if __name__ == "__main__":
     ##
     pinfo.fill_source_info ( pkg['source'], RAD[pkg['source']], DECD[pkg['source']] )
     pinfo.fill_beam_info ( 0. )
+    #### parallactic angle
+    pal_angle     = 0.0
+    pos_angle     = 0.0
+    pal_freq      = freq[0]
+    if not args.noise_diode:
+        pal_angle = pinfo.get_parallactic_angle ( tobs )
+        #### position angle
+        pos_angle, pal_freq = pinfo.get_position_angle ()
+    #### Ionospheric RM contribution
+    ionosrm         = 0.0
+    srcrm           = 0.0
+    if not args.noise_diode:
+        ionosrm     = pinfo.get_ionospheric_RM ( tobs )
+        #### source RM
+        srcrm       = pinfo.get_rotation_measure () 
+    #### correct for both
+    angle_corr  = pal_angle + pos_angle
+    rm_corr     = ionosrm + srcrm
+    #### logging
+    print (f" Parallactic angle = {np.rad2deg(pal_angle):.3f}")
+    # print (f" Position angle    = {np.rad2deg(pos_angle):.3f}")
+    print (f" Ionospheric RM    = {ionosrm:.3f}")
+    print (f" Source RM         = {srcrm:.3f}")
+    print (f" Correction angle  = {np.rad2deg(angle_corr):.3f}")
+    print (f" Correction RM     = {rm_corr:.3f}")
     ##################################################
     ### perform fitting
     ###################################################
-    if feed == 'CIRC':
-        from get_ionos_rm import get_ionospheric_rm
-        print (" ***** Using CIRCULAR feeds *****")
-        #### parallactic angle
-        pal_angle = pinfo.get_parallactic_angle ( tobs )
-        #### position angle
-        pos_angle = pinfo.get_position_angle ()
-        #### Ionospheric RM contribution
-        ionosrm     = get_ionospheric_rm ( pinfo.sc.ra.radian, pinfo.sc.dec.radian, tobs.mjd )
-        #### source RM
-        srcrm       = pinfo.get_rotation_measure () 
-        #### correct for both
-        angle_corr  = pal_angle + pos_angle
-        rm_corr     = ionosrm + srcrm
-        #### logging
-        print (f" Parallactic angle = {np.rad2deg(pal_angle):.3f}")
-        # print (f" Position angle    = {np.rad2deg(pos_angle):.3f}")
-        print (f" Ionospheric RM    = {ionosrm:.3f}")
-        print (f" Source RM         = {srcrm:.3f}")
-        print (f" Correction angle  = {np.rad2deg(angle_corr):.3f}")
-        print (f" Correction RM     = {rm_corr:.3f}")
-        caler       = circ_mypacv ( feed, freq, ff, off_std, angle_corr, rm_corr )
-    elif feed == 'LIN':
-        print (" ***** Using LINEAR feeds *****")
-        """
-        in linear feeds
-        no need to use ionospheric RM and parallactic angle
-        """
-        caler       = lin_mypacv  ( feed, freq, ff, off_std )
-    caler.fit_dphase ( undir, test=not True )
+    caler       = MyPACV ( feed, freq, ff, off_std, rm_corr, angle_corr, pal_freq )
+    caler.fit_dphase ( undir, test=False )
     caler.diag_plot ( dpfile )
-    # caler.diag_plot ( None )
-    # daf
     caler.sol_plot  ( spfile )
     ##################################################
     ### write into pacv
@@ -534,21 +544,19 @@ if __name__ == "__main__":
     ## v sensitive to AABBCRCI definition
     data[0, ..., 0] = caler.gain
     data[0, ..., 1] = caler.dgain
-    if feed == 'CIRC':
-        data[0, ..., 2] = caler.get_line_wrap ( caler.dphase_lpar, hin=True)
-    elif feed == 'LIN':
-        data[0, ..., 2] = caler.dphase
+    data[0, ..., 2] = caler.get_line_wrap ( caler.dphase_lpar, hin=True)
     dataerr[0, ..., 0]  = caler.gainerr
     dataerr[0, ..., 1]  = caler.dgainerr
     dataerr[0, ..., 2]  = caler.dphaseerr
     ##################################################
     ### pacv fits header
     ###################################################
-    primary_header  = pinfo.fill_primary_header ( feed, hand )
+    primary_header  = pinfo.fill_primary_header (  )
     primary_hdu     = fits.PrimaryHDU (header=primary_header)
     history_hdu     = pinfo.fill_history_table ()
 
-    calsol_header   = pinfo.fill_solution_header ()
+    calsol_header   = pinfo.fill_solution_header ( *caler.dphase_lpar )
+    ## XXX note that there is no ``hin'' operation happening here
     calsol_columns  = [
         fits.Column(name="DAT_FREQ", format=f"{nchan:d}D", unit="MHz", array=dat_freq),
         fits.Column(name="DAT_WTS",  format=f"{nchan:d}E", array=dat_wts),
