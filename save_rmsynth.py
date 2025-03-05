@@ -9,7 +9,8 @@ import sys
 
 import numpy as np
 
-from read_prepare import read_prepare_tscrunch 
+# from read_prepare import read_prepare_tscrunch 
+from read_prepare import read_prepare_tscrunch_nofcut
 
 def get_args ():
     import argparse as agp
@@ -29,16 +30,16 @@ if __name__ == "__main__":
     ###
     bn  = os.path.basename ( arg )
     ###
-    ofile = os.path.join ( args.odir, bn + ".synth" )
+    ofile = os.path.join ( args.odir, bn + ".fsynth" )
 
-    freqs, i, q, u, v, ei, eq, eu, ev = read_prepare_tscrunch ( arg, args.fs, args.nosub)
+    freqs, i, q, u, v, ei, eq, eu, ev = read_prepare_tscrunch_nofcut ( arg, args.fs, args.nosub)
 
     i = np.array ( i[...,0] )
     q = np.array ( q[...,0] )
     u = np.array ( u[...,0] )
     v = np.array ( v[...,0] )
 
-    cat  = np.vstack ( (freqs, i, q, u, ei, eq, eu) ).T
+    cat  = np.vstack ( (freqs*1E6, i, q, u, ei, eq, eu) ).T
     ## 7 columns
     ## freq, I Q U, errors I Q U
 
