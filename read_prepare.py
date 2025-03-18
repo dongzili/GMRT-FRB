@@ -7,7 +7,7 @@ DX correction is the differential gain-like term we are seeing in Cross coherenc
 
 import numpy as np
 
-__all__ = ['read_prepare_tscrunch', 'read_prepare_max', 'read_prepare_ts_dx']
+__all__ = ['read_prepare_tscrunch', 'read_prepare_max', 'read_prepare_ts_dx', 'read_prepare_peak']
 
 def resize_slice_bool ( inp, fac):
     """
@@ -788,3 +788,92 @@ def read_prepare_tscrunch_nofcut (
     # V_err /= G
 
     return freq_list, I, Q, U, V, I_err, Q_err, U_err, V_err
+
+def read_prepare_peak ( 
+        pkg_file,
+        fscrunch,
+        no_subtract,
+        v=False
+    ):
+    """
+    pkg_file: npz file made by peakpkg
+    fscrunch: int 
+    no_subtract: bool to control whether to smooth or not
+    v: bool verbose flag
+    returns
+    freq_list, IQUV, errors(IQUV)
+    """
+    ##
+    pkg     = np.load ( pkg_file )
+
+    ## read meta
+    Nch     = int ( pkg['nchan'] / fscrunch )
+    Nbin    = pkg['nbin']
+
+    # read data
+    # data    = block_reduce (  pkg['data'][0], (1, fscrunch, 1), func=np.mean )
+    # wts     = np.ones (pkg['data'].shape, dtype=bool)
+    # ww      = np.array (pkg['wts'], dtype=bool)
+    # wts[:,:,ww,:] = False
+    # ww      = block_reduce (  wts[0] ,  (1, fscrunch, 1), func=np.mean )
+
+    mata    = np.ma.MaskedArray ( pkg['max_slice'], mask=pkg['mask_max'], fill_value=np.nan )
+    bata    = np.ma.MaskedArray ( pkg['min_slice'], mask=pkg['mask_min'], fill_value=np.nan )
+    sata    = np.ma.MaskedArray ( pkg['std_slice'], mask=pkg['mask_std'], fill_value=np.nan )
+
+    ## here mata, bata = (npol,nchan)
+
+    mata    = block_reduce ( mata, (1, fscrunch), func=np.nanmean )
+    bata    = block_reduce ( bata, (1, fscrunch), func=np.nanmean )
+    sata    = block_reduce ( sata, (1, fscrunch), func=np.nanmean )
+
+    if fscrunch > 1:
+        print (" Frequency downsampling by {fs:d}\t {nch0:d} --> {nch1:d}".format (fs=fscrunch, nch0=pkg['nchan'], nch1=Nch))
+
+    # mata    = np.ma.array (data, mask=ww, fill_value=np.nan)
+    # mask    = ww[0].sum (1) == 0.0
+    # zask    = ww[0].sum (1) != 0.0
+    # ff_mask = ff_mask & mask
+
+    # axes
+    freqs     = np.linspace (-0.5*pkg['fbw'], 0.5*pkg['fbw'], Nch, endpoint=True) + pkg['fcen']
+    freq_list = np.linspace (-0.5*pkg['fbw'], 0.5*pkg['fbw'], Nch, endpoint=True) + pkg['fcen']
+
+    ## Stokes ON pulse
+    I_on    = np.array ( mata[0] )
+    Q_on    = np.array ( mata[1] )
+    U_on    = np.array ( mata[2] )
+    V_on    = np.array ( mata[3] )
+
+    ## Stokes OFF pulse
+    I_off   = np.array ( bata[0] )
+    Q_off   = np.array ( bata[1] )
+    U_off   = np.array ( bata[2] )
+    V_off   = np.array ( bata[3] )
+
+    ## freq_list
+    # freq_list = freq_list [ ff_mask ]
+
+    ## per channel std-dev
+    I_std   = np.array ( sata[0] )
+    Q_std   = np.array ( sata[1] )
+    U_std   = np.array ( sata[2] )
+    V_std   = np.array ( sata[3] )
+
+    if no_subtract:
+        I  = I_on
+        Q  = Q_on
+        U  = U_on
+        V  = V_on
+    else:
+        I  = I_on - I_off
+        Q  = Q_on - Q_off
+        U  = U_on - U_off
+        V  = V_on - V_off
+
+    I  = I[:,np.newaxis]
+    Q  = Q[:,np.newaxis]
+    U  = U[:,np.newaxis]
+    V  = V[:,np.newaxis]
+
+    return freq_list, I, Q, U, V, I_std, Q_std, U_std, V_std
