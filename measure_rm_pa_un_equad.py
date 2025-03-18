@@ -29,7 +29,7 @@ import ultranest.stepsampler
 
 from scipy.ndimage import gaussian_filter1d
 
-from read_prepare import read_prepare_tscrunch, read_prepare_max, read_prepare_ts_dx
+from read_prepare import read_prepare_tscrunch, read_prepare_max, read_prepare_ts_dx, read_prepare_peak
 # from skimage.measure import block_reduce
 
 def split_extension ( f ):
@@ -82,7 +82,7 @@ def get_args ():
     add  = ag.add_argument
     add ('-b','--smooth', default=32, type=float, help='Gaussian smoothing sigma', dest='bw')
     add ('-f','--fscrunch', default=2, type=int, help='Frequency downsample', dest='fs')
-    add ('-c','--choice', default='ts', choices=['ts','max'], help='what kind of visualization', dest='ch')
+    add ('-c','--choice', default='ts', choices=['ts','max','peak'], help='what kind of visualization', dest='ch')
     add ('pkg', help="package file output by make_pkg")
     # add ('-s','--selfcal', help='Selfcal file', dest='sc')
     add ('-n','--no-subtract', help='do not subtract off', action='store_true', dest='nosub')
@@ -280,6 +280,9 @@ if __name__ == "__main__":
                 args.nosub,
                 args.v
         )
+    elif args.ch == 'peak':
+        ### assume the input is made from make_peakpkg
+        freq_list, I, Q, U, V, I_err, Q_err, U_err, V_err = read_prepare_peak (args.pkg, args.fs, args.nosub, args.v)
 
     ## compute lambdas
     lam2      = np.power ( C / freq_list, 2 )
