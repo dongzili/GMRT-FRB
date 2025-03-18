@@ -68,7 +68,7 @@ def get_args ():
     add ('-p','--pacv', help='PACV to be patched. Will be copied', required=True, dest='pacv')
     add ('-d','--data', help='1GC Peakpkg package', required=True, dest='peakpkg')
     add ('-r','--rmfit', help='RMfit solution of the 1GC Peakpkg package', required=True, dest='rmfit')
-    add ('-s','--save', help='Save patch', default=None, dest='save_patch')
+    add ('-s','--save', help='Save patch', default=None, dest='save_patch', action='store_true')
     return ap.parse_args ()
 
 
