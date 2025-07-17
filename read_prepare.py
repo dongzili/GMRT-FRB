@@ -7,7 +7,7 @@ DX correction is the differential gain-like term we are seeing in Cross coherenc
 
 import numpy as np
 
-__all__ = ['read_prepare_tscrunch', 'read_prepare_max', 'read_prepare_ts_dx', 'read_prepare_peak']
+__all__ = ['read_prepare_tscrunch', 'read_prepare_max', 'read_prepare_ts_dx', 'read_prepare_peak', 'read_prepare_tscrunch_nofcut']
 
 def resize_slice_bool ( inp, fac):
     """
@@ -661,6 +661,7 @@ def read_prepare_tscrunch_nofcut (
     v: bool verbose flag
     returns
     freq_list, IQUV, errors(IQUV)
+    no frequency cut
     """
     ##
     pkg     = np.load ( pkg_file )
