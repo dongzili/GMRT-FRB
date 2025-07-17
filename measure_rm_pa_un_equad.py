@@ -431,5 +431,5 @@ if __name__ == "__main__":
     fig.suptitle (bn+"\n"+ut)
     if rank == 0:
         fig.savefig ( os.path.join ( args.odir, bn + ".png" ), dpi=300, bbox_inches='tight' )
-        np.savez ( os.path.join ( args.odir, bn + "_sol.npz"), **RET, **result)
+        #np.savez ( os.path.join ( args.odir, bn + "_sol.npz"), **RET, **result)
     # plt.show ()
