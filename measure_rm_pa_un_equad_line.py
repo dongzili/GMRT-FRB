@@ -46,6 +46,7 @@ def get_args ():
     add  = ag.add_argument
     add ('-b','--smooth', default=4, type=float, help='Gaussian smoothing sigma', dest='bw')
     add ('-f','--fscrunch', default=4, type=int, help='Frequency downsample', dest='fs')
+    add ('-r','--fref', default='band', choices=['burst', 'band', 'noref'], help='freq ref burst center or band', dest='fref')
     add ('-c','--choice', default='max', choices=['max', 'ts'], help='what kind of visualization', dest='ch')
     add ('pkg', help="package file output by make_pkg")
     # add ('-s','--selfcal', help='Selfcal file', dest='sc')
@@ -162,8 +163,9 @@ class PHIL2:
             log_dir = DIR
         )
         sampler.stepsampler = ultranest.stepsampler.SliceSampler (
-            nsteps = 25,
-            generate_direction = ultranest.stepsampler.generate_cube_oriented_differential_direction,
+            nsteps = 64,
+            #generate_direction = ultranest.stepsampler.generate_cube_oriented_differential_direction,
+            generate_direction = ultranest.stepsampler.generate_mixture_random_direction,
             adaptive_nsteps='move-distance',
         )
         result              = sampler.run (
@@ -257,14 +259,23 @@ if __name__ == "__main__":
     lam2      = np.power ( C / freq_list, 2 )
     # l02       = lam2.mean ()
     # l02       = lam2.min ()
-    # l02       = np.power ( C / 650., 2 )
-    # lam2      -= l02
+    if args.fref == 'burst':
+        fref  = np.median ( freq_list )
+        l02   = np.power ( C / fref, 2.0 )
+    elif args.fref == 'band':
+        fref  = 650.0 + (0.5 * 200 / 2048)
+        l02   = np.power ( C / fref, 2 )
+    elif args.fref == 'noref':
+        l02   = 0.0
+
+    lam2      -= l02
 
 
     RET     = dict ()
+    RET['frefarg'] = args.fref
     RET['filename'] = bn
-    # RET['l02']  = l02
-    # RET['fref'] = C / np.sqrt ( l02 )
+    RET['l02']  = l02
+    RET['fref'] = C / np.sqrt ( l02 )
     RET['lam2'] = lam2
 
     RET['fs']   = args.fs
@@ -350,11 +361,11 @@ if __name__ == "__main__":
 
     # _yerr = quv.yerr + quv.equad
     _yerr = quv.yerr
-    xdata.errorbar ( quv.xfit, quv.yfit, yerr=_yerr, capsize=5, ls='', **deb)
-    xdata.plot ( quv.xfit, mphi, **qp )
+    xdata.errorbar ( quv.xfit+l02, quv.yfit, yerr=_yerr, capsize=5, ls='', **deb)
+    xdata.plot ( quv.xfit+l02, mphi, **qp )
 
     # xres.scatter ( lam2, mres / _yerr, **deb )
-    xres.scatter ( lam2, mres, **deb )
+    xres.scatter ( lam2+l02, mres, **deb )
 
     xres.axhline (0., ls='--', c='k', alpha=0.4)
 
