@@ -8,7 +8,24 @@ extension of my_pacv
 for linear feeds IQUV
     ionospheric RM rotates QU
     position angle rotates QU
-    parallactic angle rotates UV
+    parallactic angle rotates QU
+    delay rotates UV
+    dgain boosts IQ
+
+Mueller matrix
+
+BOOST[IQ] * ROTATION[UV] * ROTATION[QU]
+^ DGAIN ^ -  ^ DELAY ^   -  ^ PAR-ANGLE & IONOS-RM & ISM-RM ^
+^   X   ^ -  ^   D   ^   -  ^ PHI   ^
+
+see :measure_rm_pa_delay_un_equad.py:
+
+IQUV = [
+    COSH(X) + LP*SINH(X)*COS(PHI),
+    SINH(X) + LP*COSH(X)*COS(PHI),
+    LP*SIN(PHI)*COS(D),
+    LP*SIN(PHI)*SIN(D),
+]
 
 this is so complicated
 """
@@ -33,9 +50,10 @@ def read_pkl (file):
 
 class MyPACV:
     """
+    made with linear feeds
 
     """
-    def __init__ (self, feed, freq, iquv, err_iquv, corr_angle, corr_rm):
+    def __init__ (self, feed, freq, iquv, err_iquv):
         """
 
         feed should be "LIN"
@@ -69,62 +87,28 @@ class MyPACV:
             raise ValueError ("Feed not recognized, feed = ", self.feed)
         self.freq    = freq.copy ()
         self.nchan   = self.freq.size
+        self.wav2    = np.power ( C / ( self.freq * 1E6 ), 2.0 )
+        ## centering wav2
+        self.wav2    -= np.power ( C / ( self.freq[self.nchan//2] * 1E6 ), 2.0 )
         self.__freq_ghz = self.freq * 1E-3
-        i, q, u, v  = iquv
+        self.i, self.q, self.u, self.v  = iquv
         if err_iquv is None:
             err_iquv = np.zeros_like ( iquv ) + 1E-1
-        ierr, qerr, uerr, verr = err_iquv
-        ###################################################
-        ### corrections
-        ###################################################
-        ### ### IONOSPHERIC RM and POSITION ANGLE CORRECTION
-        ### ### PARALLACTIC ANGLE AUCH
-        ## freq is in MHz
-        wav2           = np.power ( C / ( self.freq * 1E6 ), 2.0 )
-        qu             = (q) + (1.0j*u)
-        qu_e           = (qerr) + (1.0j*uerr)
-        corr_phase     = 2.0 * ( corr_angle + (corr_rm*wav2) )
-        qu_corr        = qu   * np.exp ( -1.0j * corr_phase )
-        qu_corr_e      = qu_e * np.exp ( -1.0j * corr_phase )
-        ###
-        self.icorr          = i
-        self.ierr           = ierr
-        self.qcorr          = np.real ( qu_corr )
-        self.qerr           = np.real ( qu_corr_e )
-        self.ucorr          = np.imag ( qu_corr )
-        self.uerr           = np.imag ( qu_corr_e )
-        self.vcorr          = v
-        self.verr           = verr
-        ###
-        self.o_i            = i.copy()
-        self.o_ierr         = ierr.copy()
-        self.o_q            = q.copy()
-        self.o_qerr         = qerr.copy()
-        self.o_u            = u.copy()
-        self.o_uerr         = uerr.copy()
-        self.o_v            = v.copy()
-        self.o_verr         = verr.copy()
+        self.ierr, self.qerr, self.uerr, self.verr = err_iquv
         ###################################################
         ### get coherence products
         ###################################################
-        aa             = (self.icorr + self.qcorr) * 0.5
-        bb             = (self.icorr - self.qcorr) * 0.5
+        aa             = (self.i + self.q) * 0.5
+        bb             = (self.i - self.q) * 0.5
         ### masking necessary to determine dead channels
         if np.any(aa<0):
             aa.mask[aa<0] = True
         if np.any(bb<0):
             bb.mask[bb<0] = True
         ### error propagation 
-        eaa            = self.__error_sum ( self.ierr, self.qerr, 'quadrature' )
-        ebb            = self.__error_sum ( self.ierr, self.qerr, 'quadrature' )
-        dab            = self.__error_sum ( eaa/aa, ebb/bb,'simple')
-        ##### this pesky thingy
-        ### note, would need to re define AABBCRCI in psrfits
-        ### XXX
-        # cr             = ucorr
-        # ci             = vcorr
-        cr             = self.ucorr
-        ci             = self.vcorr
+        eaa    = self.__error_sum ( self.ierr, self.qerr, 'quadrature' )
+        ebb    = self.__error_sum ( self.ierr, self.qerr, 'quadrature' )
+        dab    = self.__error_sum ( eaa/aa, ebb/bb,'simple')
         ###################################################
         ### singleaxis model
         ###################################################
@@ -133,13 +117,6 @@ class MyPACV:
         self.gainerr    = 0.25 * self.gain * dab
         self.dgain      = 0.25 * np.log ( aa / bb )
         self.dgainerr   = 0.25 * dab 
-        self.dphase     = np.arctan ( ci / cr )
-        self.sigma_i    = np.mean ( np.sqrt (  (self.ucorr/self.g2)**2 + (self.vcorr/self.g2)**2 ) )
-        ## i can probably remove sigma
-        self.sigma      = self.sigma_i
-        ###
-        self.dphase_unwrap = self.__unwrap ( self.dphase )
-        self.dphase_lpar_i = np.polyfit ( self.freq, self.dphase_unwrap, 1 )
         ###################################################
         ### prepare for fit
         ### lpar is the line parameters
@@ -148,17 +125,22 @@ class MyPACV:
         ##### dphase error is wrapped
         ###################################################
         self.dphase_lpar   = np.zeros ( 2 )
-        self.dphase_line   = np.zeros_like ( self.freq )
+        self.dphase        = np.zeros_like ( self.freq )
         self.dphaseerr     = np.zeros_like ( self.freq )
         ###################################################
         ### prepare yfit,yerr
         ###################################################
-        self.__yfit    = np.concatenate ( (self.ucorr, self.vcorr) )
-        self.__yerr    = np.concatenate ( (self.uerr, self.verr) )
+        self.__yfit    = np.concatenate ( 
+            (self.i, self.q, self.u, self.v) 
+        )
+        self.__yerr    = np.concatenate ( 
+            (self.ierr, self.qerr, self.uerr, self.verr) 
+        )
         self.__yerrll  = -0.5 * np.sum ( np.log ( 2.0 * np.pi * self.__yerr**2 ) )
         ##################################################
         ### in the diag plot add the line
-        self.plotxt    = f"RM_ionos = {corr_rm:.2f} angle_corr = {np.rad2deg(corr_angle):.2f} deg"
+        # self.plotxt    = f"RM_ionos = {corr_rm:.2f} angle_corr = {np.rad2deg(corr_angle):.2f} deg"
+        self.plotxt    = ""
 
     def __error_sum (self, dx, dy, method):
         """ either sum in quadrature or simple """
@@ -180,11 +162,15 @@ class MyPACV:
         return self.__wrap ( np.polyval ( par, self.freq ) )
 
     def get_line ( self, par ):
-        dpi, bias = par
+        """ do i need this """
+        raise RuntimeError (" still using this?")
+        rm, delay_pi, pa, bias, lp = par
         return bias + ( dpi * self.freq * 1E-3 )
 
     def get_line_wrap ( self, par, hin=False):
-        dpi, bias = par
+        """ do i need this """
+        raise RuntimeError (" still using this?")
+        rm, delay_pi, pa, bias, lp = par
         aa        = bias + ( dpi * self.freq * 1E-3 )
         if hin:
             return self.__wrap ( -0.5 * aa )
@@ -200,25 +186,35 @@ class MyPACV:
         """ goes to history """
         return self.history
 
-    def model ( self, delay_pi, bias, sigma=None ):
-        """ CRCI model freq in MHz """
-        if sigma is None: sigma = self.sigma_i
-        aa = bias + (delay_pi * self.freq * 1E-3)
+    def model ( self, rm, delay_pi, pa, bias, lp ):
+        """ 
+        rm, delay_pi, pa, bias, lp
+        """
+        ## angles
+        X   = 2.0 * self.dgain
+        phi = 2.0 * ( (self.wav2 * rm) + pa )
+        D   = bias + (delay_pi * self.freq * 1E-3)
         g2 = self.g2
-        # g2 = 1.0
-        uu = sigma * g2 * np.cos ( aa )
-        vv = sigma * g2 * np.sin ( aa )
-        return uu,vv
+
+        ## forward model
+        ii = g2 * ( 
+            np.cosh ( X ) + ( lp * np.sinh ( X ) * np.cos ( phi ) ) 
+        )
+        qq = g2 * ( 
+            np.sinh ( X ) + ( lp * np.cosh ( X ) * np.cos ( phi ) ) 
+        )
+        uu = g2 * lp * np.sin ( phi ) * np.cos ( D )
+        vv = g2 * lp * np.sin ( phi ) * np.sin ( D )
+        ## return
+        return ii,qq,uu,vv
 
     def __un_solver__ ( self, DIR ):
         """ performs minimization using ultranest
-            
-            line ~ bias + delay*freq
 
+            rm, delay_pi, pa, bias, lp
+            
             bias in between 0.--> 2pi
             pi*delay in -30ns to 30ns
-            delay in -30ns/pi to 30ns/pi
-            pi*delay in -4ns to 4ns
 
             freq is in GHz
             
@@ -228,17 +224,24 @@ class MyPACV:
         import ultranest.stepsampler
 
         ##
-        SLICE_DPI   = 0
-        SLICE_BIAS  = 1
-        names  = ['DELAY_PI', 'BIAS']
+        SLICE_RM    = 0
+        SLICE_DPI   = 1
+        SLICE_PA    = 2
+        SLICE_BIAS  = 3
+        SLICE_LP    = 4
+        names  = [
+            'RM', 'DELAY_PI', 'PA', 'BIAS', 'LP'
+        ]
         ##
         def priorer (cube):
             param = np.zeros_like ( cube )
-            param[SLICE_DPI]    = (-400.0) + ( 800.0 * cube[SLICE_DPI] )
-            param[SLICE_BIAS]   =  2.0 * np.pi * cube[SLICE_BIAS] 
-            ## have BIAS in [0., 2.0*np.pi)
-            # param[SLICE_BIAS]   = ( -1.5 * np.pi ) +  ( 3.0 * np.pi * cube[SLICE_BIAS]  )
+            param[SLICE_RM]    = (-400.0) + ( 800.0 * cube[SLICE_RM] )
+            param[SLICE_DPI]   = (-400.0) + ( 800.0 * cube[SLICE_DPI] )
+            param[SLICE_PA]    =  1.0 * np.pi * cube[SLICE_PA] 
+            param[SLICE_BIAS]  =  2.0 * np.pi * cube[SLICE_BIAS] 
+            param[SLICE_LP]    =  1.0 * cube[SLICE_LP] 
             return param
+
         def logll ( par ):
             yy   = np.concatenate ( self.model (*par)  )
             return -0.5 * np.sum ( np.power ( ( yy - self.__yfit ) / self.__yerr, 2.0 ) ) + self.__yerrll
@@ -246,7 +249,7 @@ class MyPACV:
         sampler             = ultranest.ReactiveNestedSampler (
             names,
             logll, priorer,
-            wrapped_params = [False, True],
+            wrapped_params = [False, False, True, True, False],
             num_test_samples = 100,
             draw_multiple = True,
             num_bootstraps = 100,
@@ -275,25 +278,32 @@ class MyPACV:
         fit a straight line
         """
         if test:
-            isol,isol_err       = [121.31,1.19], [1e-2, 1e-2]
+            isol       = [-121.31,32, np.pi*0.25, np.pi/8, 0.8]
+            isol_err   = [1E-2] * 5
         else:
             isol,isol_err       = self.__un_solver__ ( dir )
         ###
-        self.dphase_lpar[:] = isol[:2]
-        self.dphaseerr[:]   = self.__wrap (
-            isol_err[1] + ( isol_err[0]*self.freq*1E-3 )
+        rm, delay_pi, pa, bias, lp = isol
+        erm, edelay_pi, epa, ebias, elp = isol_err
+        ###
+        self.isol     = isol
+        self.isol_err = isol_err
+        ###
+        self.dphase_lpar[:] = delay_pi, bias
+        self.dphase[:]      = self.__wrap (
+            -0.5 * ( bias + ( delay_pi * self.freq * 1E-3 ) )
         )
-        # self.sigma          = isol[2]
-        self.sigma          = self.sigma_i
+        self.dphaseerr[:]   = self.__wrap (
+            -0.5 * ( ebias + ( edelay_pi * self.freq * 1E-3 ) )
+        )
         ## history
-        delay           = isol[0] / np.pi
-        bias            = isol[1]
+        delay           = delay_pi / np.pi
         self.history   += f"Fitted dphase\n\tbias={bias:.3f} delay={delay:.3f} us\n"
 
     def diag_plot ( self, save=None ):
         """  plots a diagnostic plot """
-        mu, mv      = self.model ( *self.dphase_lpar, self.sigma )
-        iu, iv      = self.model ( *self.dphase_lpar_i, self.sigma  )
+        rm, delay_pi, pa, bias, lp = self.isol
+        ii,qq,uu,vv = self.model ( rm, delay_pi, pa, bias, lp )
         ##########################################
         import matplotlib.pyplot as plt
         
@@ -301,43 +311,40 @@ class MyPACV:
             fig         = plt.figure ()
         else:
             fig         = plt.figure (dpi=300, figsize=(7,5))
-        ax,qx,ux,vx    = fig.subplots ( 4,1,sharex=True )
-
-        ax.scatter ( self.freq, self.dphase, marker='.',c='k', label='DATA' )
-        ax.plot ( self.freq, self.get_pval (self.dphase_lpar_i), ls='-',c='r',label='INITIAL' )
-        ax.plot ( self.freq, self.get_line_wrap(self.dphase_lpar), ls='-',c='b',label='FIT' )
-        ax.set_ylabel ('DPHASE / rad')
-        ax.legend (loc='best')
+        ix,qx,ux,vx     = fig.subplots ( 4,1,sharex=True )
 
         MS=1
         LW=0.5
 
-        qx.errorbar ( self.freq, self.o_q, yerr=self.o_qerr, c='k', label='DATA', alpha=0.4, marker='o', markersize=MS, linewidth=LW )
-        qx.errorbar ( self.freq, self.qcorr, yerr=np.abs( self.qerr ), c='k', label='DATA-FIT', marker='o', markersize=MS, linewidth=LW )
-        # qx.plot ( self.freq, mq, c='b', label='FIT' )
-        # qx.plot ( self.freq, iq, c='r', label='INITIAL' )
-        qx.set_ylabel ('Q')
+        ix.errorbar ( self.freq, self.i/self.g2, yerr=self.ierr/self.g2, c='k', label='DATA', alpha=0.4, marker='o', markersize=MS, linewidth=LW )
+        ix.plot ( self.freq, ii/self.g2, c='cyan', label='FIT', marker='o', markersize=MS, linewidth=LW )
+        ix.set_ylabel ('I/G2')
+        ix.legend (loc='best')
+
+        qx.errorbar ( self.freq, self.q/self.g2, yerr=self.qerr/self.g2, c='k', label='DATA', alpha=0.4, marker='o', markersize=MS, linewidth=LW )
+        qx.plot ( self.freq, qq/self.g2, c='r', label='FIT', marker='o', markersize=MS, linewidth=LW )
+        qx.set_ylabel ('Q/G2')
         qx.legend (loc='best')
 
-        ux.errorbar ( self.freq, self.o_u, yerr=self.o_uerr, c='k', label='DATA', alpha=0.4, marker='o', markersize=MS, linewidth=LW )
-        ux.errorbar ( self.freq, self.ucorr, yerr=np.abs( self.uerr ), c='r', label='DATA-FIT', marker='o', markersize=MS, linewidth=LW )
-
-        ux.plot ( self.freq, mu, c='b', label='FIT' )
-        # ux.plot ( self.freq, iu, c='r', label='INITIAL' )
-        ux.set_ylabel ('U')
+        ux.errorbar ( self.freq, self.u/self.g2, yerr=self.uerr/self.g2, c='k', label='DATA', alpha=0.4, marker='o', markersize=MS, linewidth=LW )
+        ux.plot ( self.freq, uu/self.g2, c='b', label='FIT', marker='o', markersize=MS, linewidth=LW )
+        ux.set_ylabel ('U/G2')
         ux.legend (loc='best')
 
-        vx.errorbar ( self.freq, self.o_v, yerr=self.o_verr, c='k', label='DATA', alpha=0.4, marker='o', markersize=MS, linewidth=LW )
-        vx.errorbar ( self.freq, self.vcorr, yerr=np.abs( self.verr ), c='r', label='DATA-FIT', marker='o', markersize=MS, linewidth=LW )
-
-        vx.plot ( self.freq, mv, c='b', label='FIT' )
-        # ux.plot ( self.freq, iu, c='r', label='INITIAL' )
-        vx.set_ylabel ('V')
+        vx.errorbar ( self.freq, self.v/self.g2, yerr=self.verr/self.g2, c='k', label='DATA', alpha=0.4, marker='o', markersize=MS, linewidth=LW )
+        vx.plot ( self.freq, vv/self.g2, c='g', label='FIT', marker='o', markersize=MS, linewidth=LW )
+        vx.set_ylabel ('V/G2')
         vx.legend (loc='best')
 
         vx.set_xlabel ('Freq / MHz')
-        # fig.suptitle (f"SIGMA = {caler.sigma_i:.3f} --> {caler.sigma:.3f}")
-        fig.suptitle ( self.plotxt )
+
+        rm, delay_pi, pa, bias, lp = self.isol
+        erm, edelay_pi, epa, ebias, elp = self.isol_err
+        fig.suptitle (
+            f"RM = {rm:.2f}+/-{erm:.2f} Delay={delay_pi/np.pi:.1f}+-{edelay_pi/np.pi:.1f} ns\n"+
+            f"LP = {lp:.1f}+/-{elp:.1f}"
+        )
+        # fig.suptitle ( self.plotxt )
 
         if save is None:
             plt.show ()
@@ -356,7 +363,7 @@ class MyPACV:
 
         gx.errorbar ( self.freq, self.gain, yerr=self.gainerr, ls='', marker='s', markersize=2, capsize=2, color='b' )
         dgx.errorbar ( self.freq, self.dgain, yerr=self.dgainerr, ls='', marker='s', markersize=2, capsize=2, color='b' )
-        dpx.errorbar ( self.freq, self.dphase, yerr=self.dphaseerr, ls='', marker='s', markersize=2, capsize=2, color='b' )
+        dpx.errorbar ( self.freq, self.dphase, yerr=np.abs( self.dphaseerr ), ls='', marker='s', markersize=2, capsize=2, color='b' )
 
 
         gx.set_ylabel ('Gain')

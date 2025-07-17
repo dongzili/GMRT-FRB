@@ -10,6 +10,8 @@ outputs a stokes-I flux calibrated time series (frequency averaged)
 with ON phase in time/frequency
 
 actually, let me just measure here to save some intermediate steps
+
+this is for phasecalibrator done as part of fluxcal verification
 """
 
 import os
@@ -28,12 +30,14 @@ import astropy.time  as at
 import astropy.units as au
 import astropy.coordinates as asc
 
+import pickle as pkl
+
 #############################################
 def get_args ():
     import argparse
     agp = argparse.ArgumentParser ("apply_fluxcal", description="Applies fluxcal solution", epilog="GMRT-FRB polarization pipeline")
     add = agp.add_argument
-    add ('pkg', help="package file output by make_pkg")
+    add ('pkg', help="package file output by make_np phasecal")
     add ('-f','--fluxcal', help='Fluxcal solution file (output of make_fluxcal.py)', dest='fx')
     add ('-O', '--outdir', help='Output directory', default="./", dest='odir')
     add ('-v','--verbose', action='store_true', dest='v')
@@ -45,12 +49,14 @@ if __name__ == "__main__":
     bn      = os.path.basename ( args.pkg )
     bnf,_   = os.path.splitext ( bn )
     odir    = args.odir
-    sofile  = os.path.join ( args.odir, bnf + ".fluxcal.json" )
+    sofile  = os.path.join ( args.odir, bnf + ".fluxphasecal.json" )
     ####################################
     # fig     = plt.figure ()
     ## read file
-    pkg     = np.load ( args.pkg )
-    obstime = pkg['obstime']
+    with open ( args.pkg, 'rb' ) as f:
+        pkg = pkl.load ( f, encoding='latin1' )
+
+    obstime = pkg['mjd']
     ####################################
     ## read fluxcal solution
     fluxcal   = np.load ( args.fx )
@@ -64,29 +70,18 @@ if __name__ == "__main__":
         raise RuntimeError (f" Fluxcal solution and burst are far apart in time!")
     ####################################
     # read data
-    data    = pkg['data'][0]
-    wts     = np.ones (pkg['data'].shape, dtype=bool)
+    data    = pkg['data']
     ww      = np.array (pkg['wts'], dtype=bool)
-    wts[:,:,ww,:] = False
-    ww      = wts[0]
-    mata    = np.ma.array (data, mask=ww, fill_value=np.nan)
+    # ww      = wts[0]
+    mata    = np.ma.array (data, mask=ww, fill_value=np.nan)[0]
 
 
     ## read meta
-    Nch     = int ( pkg['nchan'] )
-    Nbin    = pkg['nbin']
+    _,Nch,Nbin = mata.shape
 
-    on_mask = np.zeros ( pkg['nbin'], dtype=bool )
-    # ff_mask = np.zeros ( pkg['nchan'], dtype=bool )
-
-    ## 20230314 : everything that is not ON is OFF
-    ons     = slice ( pkg['tstart'], pkg['tstop'] )
-    on_mask[ons]   = True
-
-    ofs     = slice ( pkg['fstart'], pkg['fstop'] )
-    mata.mask[:,0:pkg['fstart'],:]  = True
-    mata.mask[:,pkg['fstop']:,:]    = True
-    # ff_mask[ofs]   = True
+    pp      = mata[0].mean(0)
+    ## this is made for phasecal
+    on_mask = pp >= (0.60*pp.max())
 
     nsamp   = mata.shape[2]
     mask    = ww[0].sum (1) == 0.0
@@ -94,8 +89,8 @@ if __name__ == "__main__":
     # ff_mask = ff_mask & mask
 
     # axes
-    tsamp   = float (pkg['dur']) / float ( nsamp )
-    times   = np.linspace ( 0., float(pkg['dur']), nsamp )
+    tsamp   = float (pkg['duration']) / float ( nsamp )
+    times   = np.linspace ( 0., float(pkg['duration']), nsamp )
     times   *= 1E3
     freqs     = np.linspace (-0.5*pkg['fbw'], 0.5*pkg['fbw'], Nch, endpoint=True) + pkg['fcen']
     freq_list = np.linspace (-0.5*pkg['fbw'], 0.5*pkg['fbw'], Nch, endpoint=True) + pkg['fcen']
@@ -136,7 +131,7 @@ if __name__ == "__main__":
             # I.mask[i]          = True
             deflection.mask[i] = True
 
-    nON       = np.sqrt ( ons.stop - ons.start )
+    nON       = np.sqrt ( on_mask.sum() )
     # 20230313 : use whole pulse region to compute the standard deviation
     # 20230313 : and multiply with sqrt ( width )
     I_err     = nON * I_std
@@ -168,13 +163,9 @@ if __name__ == "__main__":
     ## error propagation
     ## save
     ret                     = dict ()
-    # times is in ms
-    ret['width_ms']         = float ( times[pkg['tstop']] - times[pkg['tstart']] )
-    ret['burst_bw_mhz']     = float ( abs ( freqs[pkg['fstop']] - freqs[pkg['fstart']] ) )
-    ret['burst_fcen_mhz']   = float ( ( freqs[pkg['fstop']] + freqs[pkg['fstart']] ) * 0.5 )
     ## 1E3 because sefd was in Jy
-    ret['fluence_jyms']     = float ( np.mean ( pp[ons] * 1E3 ) )  
-    ret['peakflux_mjy']     = float ( np.max ( pp[ons] * 1E3 ) )
+    ret['fluence_jyms']     = float ( np.mean ( pp[on_mask] * 1E3 ) )  
+    ret['peakflux_mjy']     = float ( np.max ( pp[on_mask] * 1E3 ) )
     ## logging
     ret['fluxcal_file']     = os.path.basename ( args.fx )
     ret['burst_file']       = bn

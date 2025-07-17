@@ -2,9 +2,12 @@
 
 uses ultranest
 
+because Gregory wants to see phase resolved RM
+with QU-fitting this time
+
 with pa
 with equad
-
+like line
 
 modified https://gitlab.mpifr-bonn.mpg.de/nporayko/RMcalc/blob/master/RMcalc.py
 modified measure_rm
@@ -29,7 +32,9 @@ import ultranest.stepsampler
 
 from scipy.ndimage import gaussian_filter1d
 
-from read_prepare import read_prepare_tscrunch, read_prepare_max, read_prepare_ts_dx, read_prepare_peak
+import scipy.optimize as so
+
+# from read_prepare import read_prepare_tscrunch, read_prepare_max, read_prepare_ts_dx
 # from skimage.measure import block_reduce
 
 def split_extension ( f ):
@@ -80,14 +85,9 @@ def get_args ():
     import argparse as agp
     ag   = agp.ArgumentParser ('RMcalc2d_unpa', epilog='Part of GMRT/FRB')
     add  = ag.add_argument
+    add ('pkg', help="package file output by read2")
+    add('-i', '--itime', help='Time sample to fit for', required=True, type=int, dest='itime')
     add ('-b','--smooth', default=32, type=float, help='Gaussian smoothing sigma', dest='bw')
-    add ('-f','--fscrunch', default=2, type=int, help='Frequency downsample', dest='fs')
-    add ('-c','--choice', default='ts', choices=['ts','max','peak'], help='what kind of visualization', dest='ch')
-    add ('pkg', help="package file output by make_pkg")
-    # add ('-s','--selfcal', help='Selfcal file', dest='sc')
-    add ('-n','--no-subtract', help='do not subtract off', action='store_true', dest='nosub')
-    add ('-v','--verbose', help='Verbose', action='store_true', dest='v')
-    add ('-O','--outdir', help='Output directory', default='rm_measurements', dest='odir')
     ##
     return ag.parse_args ()
 
@@ -116,11 +116,11 @@ class QUV1D:
         error arrays are (frequency,)
 
         """
-        self.fs,self.ts = i.shape
+        self.fs  = i.size
         ###
-        self.yfit     = np.append ( q.ravel(), u.ravel() )
-        self.yerr     = np.append ( np.tile (qerr, self.ts), np.tile (uerr, self.ts) )
-        self.xfit     = wave2.reshape ((self.fs, 1))
+        self.yfit     = np.append ( q, u )
+        self.yerr     = np.append ( qerr, uerr )
+        self.xfit     = wave2
         self.ifit     = i.copy ()
         ###
         self.rm       = None
@@ -196,14 +196,14 @@ class QUV1D:
             log_dir = DIR
         )
         sampler.stepsampler = ultranest.stepsampler.SliceSampler (
-            nsteps = 25,
-            generate_direction = ultranest.stepsampler.generate_cube_oriented_differential_direction,
+            nsteps = 128,
+            generate_direction = ultranest.stepsampler.generate_mixture_random_direction,
             adaptive_nsteps='move-distance',
         )
         result              = sampler.run (
-            min_num_live_points = 1024,
-            frac_remain = 1E-4,
-            min_ess = 512,
+            min_num_live_points = 4096,
+            frac_remain = 1E-9,
+            min_ess = 2048,
         )
         # result = dict()
         ###
@@ -245,7 +245,7 @@ class QUV1D:
 
     def model (self, l, i):
         # m      = self.amps * i * np.exp ( 2j * ( (l.reshape((self.fs, 1)) * self.rm) + self.pa.reshape ((1, self.ts)) ))
-        m      = self.amps * i * np.exp ( 2j * ( (l.reshape((self.fs, 1)) * self.rm) + self.pa ))
+        m      = self.amps * i * np.exp ( 2j * ( (l * self.rm) + self.pa ))
         # m      = self.amps * i * np.exp ( 2j * ( (l.reshape((self.fs, 1)) * self.rm) ))
         return np.real (m), np.imag (m)
 
@@ -253,121 +253,68 @@ class QUV1D:
         LR     = q + (1j * u)
         # m      = LR * np.exp ( (-2j * l.reshape((-1, 1)) * self.rm) )
         # m      = LR * np.exp ( -2j * ( ( l.reshape((-1, 1)) * self.rm ) + self.pa.reshape((1, self.ts)) ) )
-        m      = LR * np.exp ( -2j * ( ( l.reshape((-1, 1)) * self.rm ) + self.pa ) )
+        m      = LR * np.exp ( -2j * ( ( l * self.rm ) + self.pa ) )
         return np.real (m), np.imag (m)
 
 if __name__ == "__main__":
     args    = get_args ()
+    _s  = args.itime
     ####################################
-    bn      = os.path.basename ( args.pkg )
-    bnf     = split_extension ( bn )
-    odir    = args.odir
+    odir    = os.path.join ( "quphaseresolved", f"s{_s:d}" )
     ####################################
 
-    if args.ch == 'ts':
-        freq_list, I, Q, U, V, I_err, Q_err, U_err, V_err = read_prepare_tscrunch (
-        # freq_list, I, Q, U, V, I_err, Q_err, U_err, V_err = read_prepare_ts_dx (
-                args.pkg,
-                # args.sc,
-                args.fs,
-                args.nosub,
-                args.v
-        )
-    elif args.ch == 'max':
-        freq_list, I, Q, U, V, I_err, Q_err, U_err, V_err = read_prepare_max (
-                args.pkg,
-                args.fs,
-                args.nosub,
-                args.v
-        )
-    elif args.ch == 'peak':
-        ### assume the input is made from make_peakpkg
-        freq_list, I, Q, U, V, I_err, Q_err, U_err, V_err = read_prepare_peak (args.pkg, args.fs, args.nosub, args.v)
 
-    ## compute lambdas
-    lam2      = np.power ( C / freq_list, 2 )
-    l02       = lam2.mean ()
-    # l02       = lam2.min ()
-    lam2      -= l02
+    f = np.load ( args.pkg )
+    freq_list = f['freqs']
+
+    _ts = f['i'].shape[1]
+
+    if _s >= _ts or _s < 0:
+        raise RuntimeError (f" in valid itime")
 
 
-    RET     = dict ()
-    RET['filename'] = bn
-    RET['l02']  = l02
-    RET['fref'] = C / np.sqrt ( l02 )
-    RET['lam2'] = lam2
-
-    RET['fs']   = args.fs
-    RET['nosub'] = args.nosub
-    RET['ch']   = args.ch
+    I, Q, U, V = f['i'][...,_s], f['q'][...,_s], f['u'][...,_s], f['v'][...,_s]
+    I_err, Q_err, U_err, V_err = f['ei'], f['eq'], f['eu'], f['ev']
 
     ### smooth the Stokes
     if args.bw > 0:
-        Ifit  = gaussian_filter1d ( I, args.bw, axis=1 )
-        Qfit  = gaussian_filter1d ( Q, args.bw, axis=1 )
-        Ufit  = gaussian_filter1d ( U, args.bw, axis=1 )
-        Vfit  = gaussian_filter1d ( V, args.bw, axis=1 )
+        Ifit  = gaussian_filter1d ( I, args.bw, axis=0 )
+        Qfit  = gaussian_filter1d ( Q, args.bw, axis=0 )
+        Ufit  = gaussian_filter1d ( U, args.bw, axis=0 )
+        Vfit  = gaussian_filter1d ( V, args.bw, axis=0 )
     else:
         Ifit  = I
         Qfit  = Q
         Ufit  = U
         Vfit  = V
 
-    if args.v:
-        print (" Calling QU fitting ... ")
+    ## compute lambdas
+    lam2      = np.power ( C / freq_list, 2 )
+    l02       = lam2.mean ()
+    # l02       = lam2.min ()
+    # lam2      -= l02
 
     ### do the actual call
     quv   = QUV1D ( lam2, Ifit, Q, U, V, I_err, Q_err, U_err, V_err )
     # result, rank = quv.test_fit_rm ( odir )
     result, rank = quv.fit_rm ( odir )
-
-    if args.v:
-        print (" done")
-
+    # result, rank = quv.so_fit_rm ( odir )
+    ###################################################
     q_rm, u_rm = quv.model ( lam2, Ifit )
     q_derot, u_derot = quv.derotate ( lam2, Q, U )
     q_res            = Qfit - q_rm
     u_res            = Ufit - u_rm
     lfraction        = quv.amps * Ifit
     chi2_red         = quv.chi2_reduced ()
-
-    RET['freq_list'] = freq_list
-    RET['model_q']   = q_rm
-    RET['model_u']   = u_rm
-    RET['fit_q']     = Qfit  
-    RET['fit_u']     = Ufit
-    RET['err_q']     = Q_err
-    RET['err_u']     = U_err
-    RET['lfraction'] = lfraction
-    RET['derot_q']   = q_derot
-    RET['derot_u']   = u_derot
-    
+    #######################
     rm_qu,rmerr_qu = quv.rm, quv.rmerr
-    # pa_qu          = np.rad2deg ( quv.pa )
-    # pa_qu          = np.rad2deg ( np.unwrap (quv.pa - np.deg2rad (15), discont=np.pi))
-    # hpi            = 0.5 * np.pi
-    # pa_qu          = np.rad2deg ( np.mod (quv.pa - np.deg2rad (20) + hpi, np.pi) - hpi )
     pa_qu          = np.rad2deg ( quv.pa )
     paerr_qu       = np.rad2deg ( quv.paerr )
     amp_qu         = quv.amps 
     amperr_qu      = quv.amperr
-
     ut  = "RM_QU = {rm:.2f} +- {rmerr:.2f} rad/m2 LFRAC = {lf:.2f} +- {lferr:.2f}\nPA = {pa:.2f} +- {paerr:.2f} Chi2 reduced = {rchi2:.2f}".format ( rm = rm_qu, rmerr = rmerr_qu, lf=amp_qu, lferr=amperr_qu, pa=pa_qu, paerr=paerr_qu, rchi2=chi2_red )
-
-    if args.v:
-        print (ut)
-
-    RET['rm_qu']       = rm_qu
-    RET['rmerr_qu']    = rmerr_qu
-    RET['pa_qu']       = pa_qu
-    RET['paerr_qu']    = paerr_qu
-    RET['amp_qu']      = amp_qu
-    RET['amperr_qu']   = amperr_qu
-    RET['equad']       = quv.equad
-    RET['equaderr']    = quv.equaderr
-
     ###### diagnostic plot from RMsynthesis
-    fig        = plt.figure (figsize=(11,7), dpi=300)
+    fig        = plt.figure ()
     # fig        = plt.figure ()
     deb      = dict (marker='.', color='k', alpha=0.5, )
     qp       = dict (ls='-', color='r', lw=3, alpha=0.7, zorder=100)
@@ -393,21 +340,21 @@ if __name__ == "__main__":
     # smu        = fig.add_subplot (gs[3])
 
     ### plotting
-    sxq.errorbar ( freq_list, Q[S], yerr=Q_err + quv.equad, **deb )
-    sxq.plot ( freq_list, q_rm[S], **qp )
+    sxq.errorbar ( freq_list, Q, yerr=Q_err + quv.equad, **deb )
+    sxq.plot ( freq_list, q_rm, **qp )
 
-    seq.errorbar ( freq_list, q_res[S], yerr=Q_err + quv.equad, **deb)
+    seq.errorbar ( freq_list, q_res, yerr=Q_err + quv.equad, **deb)
 
-    smq.plot ( freq_list, lfraction[S], **qp )
-    smq.errorbar ( freq_list, q_derot[S], yerr=Q_err + quv.equad, **deb )
+    smq.plot ( freq_list, lfraction, **qp )
+    smq.errorbar ( freq_list, q_derot, yerr=Q_err + quv.equad, **deb )
 
-    sxu.errorbar ( freq_list, U[S], yerr=U_err + quv.equad, **deb )
-    sxu.plot ( freq_list, u_rm[S], **up )
+    sxu.errorbar ( freq_list, U, yerr=U_err + quv.equad, **deb )
+    sxu.plot ( freq_list, u_rm, **up )
 
-    seu.errorbar ( freq_list, u_res[S], yerr=U_err + quv.equad, **deb)
+    seu.errorbar ( freq_list, u_res, yerr=U_err + quv.equad, **deb)
 
     # smu.plot ( freq_list, lfraction[S], **up )
-    smu.errorbar ( freq_list, u_derot[S], yerr=U_err + quv.equad, **deb )
+    smu.errorbar ( freq_list, u_derot, yerr=U_err + quv.equad, **deb )
 
     ################ beautify
     for ix in [smu, sxq, smq, sxu, seq, seu]:
@@ -431,8 +378,9 @@ if __name__ == "__main__":
     seu.set_ylabel ('U\nError')
     smu.set_ylabel ('U\nDerotated')
 
-    fig.suptitle (bn+"\n"+ut)
+    fig.suptitle (f"slice={_s:d}"+"\n"+ut)
     if rank == 0:
-        fig.savefig ( os.path.join ( args.odir, bn + ".png" ), dpi=300, bbox_inches='tight' )
-        #np.savez ( os.path.join ( args.odir, bn + "_sol.npz"), **RET, **result)
-    # plt.show ()
+        fig.savefig ( os.path.join ( "quphaseresolved", f"res_{_s:02d}.png"), dpi=300, bbox_inches='tight' )
+        # np.savez ( os.path.join ( args.odir, bn + "_sol.npz"), **RET, **result)
+
+

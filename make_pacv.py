@@ -26,6 +26,10 @@ from circ_pacv import read_pkl, MyPACV
 RAD,DECD         = dict(),dict()
 RAD['3C138']     = 79.5687917
 DECD['3C138']    = 16.5907806
+RAD['R3']        = 29.50312583
+DECD['R3']       = 65.71675422
+RAD['3C48']      = 24.4220417
+DECD['3C48']     = 33.1597417
 
 def get_args ():
     import argparse
@@ -36,6 +40,7 @@ def get_args ():
     add ('-v','--verbose', action='store_true', dest='v')
     add ('-a','--par-angle', help='Parallactic angle in degrees', dest='pangle', default=None, type=float)
     add ('-i','--ionos-rm', help='Ionospheric RM', dest='ionosrm', default=None, type=float)
+    add ('-n','--noise-diode', help='Noise diode', action='store_true', dest='noise_diode')
     return agp.parse_args ()
 
 class BasePacvInfo(object):
@@ -136,10 +141,18 @@ class BasePacvInfo(object):
 
            This Q/U sign flip
            There is a sign flip in V
+
+           also returns the reference frequency
+
+           all this thanks uGMRT Band-4 imaging polcal
         """
-        if self.src_name != "3C138":
+        if self.src_name == "R3":
+            ## probably noise diode scan
+            return np.deg2rad ( 0 ), 551.5625
+        elif self.src_name == "3C138":
+            return np.deg2rad ( -32 ), 551.5625
+        else:
             raise RuntimeError ("Source not identified src=",self.src_name)
-        return np.deg2rad ( -32 )
 
     def get_rotation_measure (self):
         """ 
@@ -155,9 +168,13 @@ class BasePacvInfo(object):
         VLA just says take RM to be zero.
             
         """
-        if self.src_name != "3C138":
+        if self.src_name == "R3":
+            ## probably noise diode scan
+            return 0.0
+        elif self.src_name == "3C138":
+            return -2.1
+        else:
             raise RuntimeError ("Source not identified src=",self.src_name)
-        return -2.1
 
     def get_ionospheric_RM (self, tobs, duration=30., nsteps=2):
         """ uses RMextract """
@@ -403,9 +420,11 @@ class BasePacvInfo(object):
         )
         return polyco_hdu
 
-    def fill_solution_header(self,):
+    def fill_solution_header(self, delay_pi, bias):
         """
         Put solution
+
+        delay_pi and bias are the calibration solution
 
         SINGLE cross coupling method
         """
@@ -419,6 +438,10 @@ class BasePacvInfo(object):
         t_hdr["PAR_0000"]     = ("G", "scalar gain")
         t_hdr["PAR_0001"]     = ("gamma", "differential gain (hyperbolic radians)")
         t_hdr["PAR_0002"]     = ("phi", "differential phase (radians)")
+
+        ## record keeping parameter
+        t_hdr["DELAY_PI"]     = (delay_pi, "DELAY_PI term in the mypacv generation")
+        t_hdr["BIAS"]         = (bias, "BIAS term in the mypacv generation")
         return t_hdr
 
 if __name__ == "__main__":
@@ -490,6 +513,20 @@ if __name__ == "__main__":
         ionosrm = args.ionosrm
     #### source RM
     srcrm       = pinfo.get_rotation_measure () 
+    pal_angle     = 0.0
+    pos_angle     = 0.0
+    pal_freq      = freq[0]
+    if not args.noise_diode:
+        pal_angle = pinfo.get_parallactic_angle ( tobs )
+        #### position angle
+        pos_angle, pal_freq = pinfo.get_position_angle ()
+    #### Ionospheric RM contribution
+    ionosrm         = 0.0
+    srcrm           = 0.0
+    if not args.noise_diode:
+        ionosrm     = pinfo.get_ionospheric_RM ( tobs )
+        #### source RM
+        srcrm       = pinfo.get_rotation_measure () 
     #### correct for both
     angle_corr  = pal_angle + pos_angle
     rm_corr     = ionosrm + srcrm
@@ -503,8 +540,8 @@ if __name__ == "__main__":
     ##################################################
     ### perform fitting
     ###################################################
-    caler       = MyPACV ( feed, freq, ff, off_std, angle_corr, rm_corr )
-    caler.fit_dphase ( undir, test=not True )
+    caler       = MyPACV ( feed, freq, ff, off_std, rm_corr, angle_corr, pal_freq )
+    caler.fit_dphase ( undir, test=False )
     caler.diag_plot ( dpfile )
     caler.sol_plot  ( spfile )
     ##################################################
@@ -533,7 +570,8 @@ if __name__ == "__main__":
     primary_hdu     = fits.PrimaryHDU (header=primary_header)
     history_hdu     = pinfo.fill_history_table ()
 
-    calsol_header   = pinfo.fill_solution_header ()
+    calsol_header   = pinfo.fill_solution_header ( *caler.dphase_lpar )
+    ## XXX note that there is no ``hin'' operation happening here
     calsol_columns  = [
         fits.Column(name="DAT_FREQ", format=f"{nchan:d}D", unit="MHz", array=dat_freq),
         fits.Column(name="DAT_WTS",  format=f"{nchan:d}E", array=dat_wts),

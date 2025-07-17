@@ -1,5 +1,5 @@
 """
-measure the ionospheric RM at the time of input
+get parallactic_angle 
 """
 # coding: utf-8
 import os
@@ -13,49 +13,18 @@ import astropy.coordinates as asc
 import astropy.units as au
 import astropy.io.fits as aif
 ################################################
-gmrt = asc.EarthLocation (
-        lat='19d06m',
-        lon='74d03m',
-        height=300, 
-)
+gmrt  = asc.EarthLocation.from_geocentric (1656342.30, 5797947.77, 2073243.16, unit="m")
 observer = ap.Observer (location=gmrt)
 
-RMS   = {"0329+54":-64.33, "0139+5814":-94.13, "R3":np.nan}
+R3_sc = asc.SkyCoord ( 29.50312583 * au.degree, 65.71675422 * au.degree, frame='icrs' )
 
 def get_parallactic_angle ( ra, dec, mjd ):
     """ source coordinates, mjd --> parallactic angle (degree) """
     atm  = at.Time ( mjd, format='mjd' )
     atc  = asc.SkyCoord ( ra, dec, unit=(au.hourangle, au.degree)  )
+    print ( atc.ra.hms, atc.dec.dms )
     pal  = observer.parallactic_angle (atm, atc).to(au.degree).value
     return pal
-
-def get_ionospheric_rm ( ra, dec, mjd, duration=30., nsteps=2, prefix='uqrg' ):
-    """ uses RMextract """
-    from RMextract.getRM import getRM
-    ###
-    pointing = []
-    if isinstance(ra, str) and isinstance(dec, str):
-        atc      = asc.SkyCoord ( ra, dec, unit=(au.hourangle, au.degree)  )
-        pointing = [ atc.ra.radian, atc.dec.radian ]
-    elif isinstance ( ra, float ) and isinstance ( dec, float ):
-        pointing = [ ra, dec ]
-    else:
-        raise ValueError("pointing error")
-    gmrt_pos = [ 1656342.30, 5797947.77, 2073243.16 ]
-    time     = mjd * 86400.0
-    ###
-    ret      = getRM ( 
-        radec=pointing,
-        stat_positions=[gmrt_pos],
-        timestep=nsteps,
-        timerange=[time,time+duration],
-        prefix=prefix,
-        # server="http://cddis.gsfc.nasa.gov/archive/gnss/products/ionex"
-        server="ftp://gssc.esa.int/gnss/products/ionex/"
-    )
-    ###
-    retrm    = ret['RM']['st1'].mean()
-    return retrm
 
 def action ( ar ):
     cal           = aif.open ( ar )
@@ -76,21 +45,15 @@ def action ( ar ):
         print (f" RA/DEC = {ra},{dec}")
     ## get PAL
     pal_deg   = get_parallactic_angle ( ra, dec, mjd )
-    ## get iRM
-    # ionos_rm  = get_ionospheric_rm ( ra, dec, mjd, prefix='upcg' )
-    ionos_rm  = get_ionospheric_rm ( ra, dec, mjd, prefix='uqrg' )
-    # ionos_rm  = get_ionospheric_rm ( ra, dec, mjd, prefix='cgim' )
-    print (f" {ar}")
-    print (f"\tSource={src_name} at MJD={mjd:.6f} parallactic_angle={pal_deg:.2f} deg")
-    print (f"\tIonospheric RM = {ionos_rm:.3f}")
-    corr_rm   = ionos_rm + RMS[src_name]
-    print (f"\tCorrection RM = {corr_rm:.3f}")
+    # print (f" {ar}")
+    # print (f"\tSource={src_name} at MJD={mjd:.6f} parallactic_angle={pal_deg:.2f} deg")
+    print ( f"{ar},{mjd:.8f},{pal_deg:.4f}" )
 
 ##############################
 SOL = 'pacv_sols/3C48_NGON_bm3_pa_550_200_32_16mar2021.raw.noise.ar.pazi.pacv'
 def get_args ():
     import argparse as agp
-    ap   = agp.ArgumentParser ('get_ionos_rm', description='Measures ionospheric RM contribution', epilog='Part of GMRT/FRB')
+    ap   = agp.ArgumentParser ('get_par_angle', description='Measures parallactic_angle', epilog='Part of GMRT/FRB')
     add  = ap.add_argument
     add ('ar', help='archive file', nargs='+')
     add ('-v', '--verbose', help='Verbose', dest='v', action='store_true')
