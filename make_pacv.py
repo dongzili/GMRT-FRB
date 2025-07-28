@@ -38,6 +38,8 @@ def get_args ():
     add ('pkl', help='Pickle file (output of make_np.py)',)
     add ('-O', '--outdir', help='Output directory', default="./", dest='odir')
     add ('-v','--verbose', action='store_true', dest='v')
+    add ('-a','--par-angle', help='Parallactic angle in degrees', dest='pangle', default=None, type=float)
+    add ('-i','--ionos-rm', help='Ionospheric RM', dest='ionosrm', default=None, type=float)
     add ('-n','--noise-diode', help='Noise diode', action='store_true', dest='noise_diode')
     return agp.parse_args ()
 
@@ -498,6 +500,19 @@ if __name__ == "__main__":
     pinfo.fill_source_info ( pkg['source'], RAD[pkg['source']], DECD[pkg['source']] )
     pinfo.fill_beam_info ( 0. )
     #### parallactic angle
+    if args.pangle is None:
+        pal_angle = pinfo.get_parallactic_angle ( tobs )
+    else:
+        pal_angle = np.deg2rad ( args.pangle )
+    #### position angle
+    pos_angle   = pinfo.get_position_angle ()
+    #### Ionospheric RM contribution
+    if args.ionosrm is None:
+        ionosrm = pinfo.get_ionospheric_RM ( tobs )
+    else:
+        ionosrm = args.ionosrm
+    #### source RM
+    srcrm       = pinfo.get_rotation_measure () 
     pal_angle     = 0.0
     pos_angle     = 0.0
     pal_freq      = freq[0]

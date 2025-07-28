@@ -166,7 +166,8 @@ class MyPACV:
     def __unwrap (self, a):
         """ to unwrap """
         # return np.unwrap (a, period=np.pi, discont=np.pi)
-        return np.unwrap (a, period=np.pi)
+        # return np.unwrap (a, period=np.pi)
+        return np.unwrap (a, discont=0.5*np.pi)
 
     def __str__ (self):
         """ goes to history """
@@ -210,7 +211,7 @@ class MyPACV:
         ##
         def priorer (cube):
             param = np.zeros_like ( cube )
-            param[SLICE_DPI]    = (-400.0) + ( 800.0 * cube[SLICE_DPI] )
+            param[SLICE_DPI]    = (-800.0) + ( 1600.0 * cube[SLICE_DPI] )
             param[SLICE_BIAS]   =  2.0 * np.pi * cube[SLICE_BIAS] 
             ## have BIAS in [0., 2.0*np.pi)
             # param[SLICE_BIAS]   = ( -1.5 * np.pi ) +  ( 3.0 * np.pi * cube[SLICE_BIAS]  )
