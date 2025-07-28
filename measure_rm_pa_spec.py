@@ -342,7 +342,9 @@ def get_args ():
     add ('-f','--fscrunch', default=4, type=int, help='Frequency downsample', dest='fs')
     add ('-n','--ntrials', default=999, type=int, help='Number of bootstrap trials', dest='ntrials')
     add ('pkg', help="package file output by make_pkg")
-    add ('-r', '--rm', help='RM range = <min-RM>:<max-RM>:<number-RM>', dest='rmg', required=True, nargs=1)
+    add ('--rmlow', help='Minimum RM in grid', dest='rmlow', default=-200, type=float)
+    add ('--rmhigh', help='Maximum RM in grid', dest='rmhigh',default=-10, type=float)
+    add ('--rmstep', help='Steps in RM grid', dest='rmgrid', default=2048, type=int)
     add ('-v','--verbose', help='Verbose', action='store_true', dest='v')
     add ('-O','--outdir', help='Output directory', default='./', dest='odir')
     ##
@@ -355,10 +357,9 @@ if __name__ == "__main__":
     bnf     = split_extension ( bn )
     odir    = args.odir
     ####################################
-    _rmg      = args.rmg[0].split(':')
     if args.v:
-        print (f" RM Grid = {float(_rmg[0]):.3f} ... {float(_rmg[1]):.3f} with {int(_rmg[2]):d} steps")
-    rm_grid   = np.linspace ( float(_rmg[0]), float(_rmg[1]), int(_rmg[2]) , endpoint=True )
+        print (f" RM Grid = {args.rmlow:.3f} ... {args.rmhigh:.3f} with {args.rmgrid:d} steps")
+    rm_grid   = np.linspace ( args.rmlow, args.rmhigh, args.rmgrid , endpoint=True )
     ####################################
     freq_list, I, Q, U, V, I_err, Q_err, U_err, V_err = read_prepare_tscrunch (
         args.pkg,
