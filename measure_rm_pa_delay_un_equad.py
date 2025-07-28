@@ -114,6 +114,7 @@ class QUV1D:
     PARS   = { RM, LFRAC, PA(...) }
 
     """
+    MAX_EQUAD = 1000.0
     def __init__ (self, freq, i, q, u, v, ierr, qerr, uerr, verr):
         """
         wave2: array
@@ -133,6 +134,8 @@ class QUV1D:
             np.tile (verr, self.ts),
             )
         )
+        QUV1D.MAX_EQUAD = self.yerr.size * self.yerr.max ()
+        print (f" Maximum EQUAD = {QUV1D.MAX_EQUAD:.3f}")
         self.xfreq    = freq.copy ().reshape ((self.fs, 1))
         self.xfit     = np.power ( C / self.xfreq, 2 )
         ## centering the axes
@@ -175,7 +178,7 @@ class QUV1D:
         # params[self.deslice] = 0.0 + (40.0 * cube[self.deslice]) 
         params[self.deslice] = -50.0 + (100.0 * cube[self.deslice]) 
         params[self.paslice] = -0.5*np.pi + (np.pi * cube[self.paslice]) 
-        params[self.eqslice] = 100.0 * cube[self.eqslice]
+        params[self.eqslice] = QUV1D.MAX_EQUAD * cube[self.eqslice]
         return params
 
     def log_likelihood ( self, arr_ ):
@@ -199,9 +202,15 @@ class QUV1D:
         ## define Lp, Vp
         Lp     = lp * self.ifit
         ## there is mixing happening
+        """
+        see model
+        """
         qq     =  Lp * np.cos ( theta )
         uu     = (Lp * np.sin ( theta ) * np.cos ( phi ))
         vv     = (Lp * np.sin ( theta ) * np.sin ( phi ))
+        # qq     =  -Lp * np.sin ( theta )
+        # uu     = (Lp * np.cos ( theta ) * np.cos ( phi )) 
+        # vv     = (Lp * np.cos ( theta ) * np.sin ( phi ))
 
         yy     = np.concatenate ( ( qq.ravel(), uu.ravel(), vv.ravel() ) )
         return -0.5 * np.sum ( np.log ( 2.0 * np.pi * sigma2 ) ) + \
@@ -220,7 +229,7 @@ class QUV1D:
             log_dir = DIR
         )
         sampler.stepsampler = ultranest.stepsampler.SliceSampler (
-            nsteps = 25,
+            nsteps = 64,
             generate_direction = ultranest.stepsampler.generate_cube_oriented_differential_direction,
             adaptive_nsteps='move-distance',
         )
@@ -288,9 +297,18 @@ class QUV1D:
         ## define Lp, Vp
         Lp     = self.lp * self.ifit
         ## there is mixing happening
+        """
+        the sign of RM is wrong
+
+        so make the IQUV=(10Lp0) correction
+        like we did for lin_pacv_c1
+        """
         qq     =  Lp * np.cos ( theta )
         uu     = (Lp * np.sin ( theta ) * np.cos ( phi )) 
         vv     = (Lp * np.sin ( theta ) * np.sin ( phi ))
+        # qq     =  -Lp * np.sin ( theta )
+        # uu     = (Lp * np.cos ( theta ) * np.cos ( phi )) 
+        # vv     = (Lp * np.cos ( theta ) * np.sin ( phi ))
         ##
         yy     = np.concatenate ( ( qq, uu, vv ) )
         return qq, uu, vv
@@ -328,6 +346,16 @@ if __name__ == "__main__":
                 args.v
         )
 
+    ##
+    ## deciding with negating Q
+    ## because that is physical
+    ## Q is like XX-YY
+    ## maybe the X,Y convention is swapped
+    # print (f" 20231010: swapping Q sign")
+    # Q = -Q
+    # print (f" 20231010: swapping U sign")
+    # U = -U
+
     # print (f" 20230417: fitting to uncalibrated objects")
     # print (f" 20230417: normalize gain")
     # print (f" 20230417: by dividing by G")
@@ -352,6 +380,8 @@ if __name__ == "__main__":
     RET['l02']  = l02
     RET['fref'] = C / np.sqrt ( l02 )
     RET['lam2'] = lam2
+
+    RET['freq_list'] = freq_list
 
     RET['fs']   = args.fs
     RET['nosub'] = args.nosub
