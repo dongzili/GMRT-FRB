@@ -154,9 +154,9 @@ def read_prepare_tscrunch (
     return freq_list, I, Q, U, V, I_err, Q_err, U_err, V_err
 # from skimage.measure import block_reduce
 
-class RMBootstrap:
+class RMPABootstrap:
     """
-    bootstrapping RM
+    bootstrapping RM and PA
     """
     def __init__ (self, w2, paw2, rm_grid):
         """
@@ -170,10 +170,12 @@ class RMBootstrap:
 
     def statistic (self, w2, pas):
         """
-        ML estimate of RM
+        ML estimate of RM and PA corresponding to the RM
         """
-        ret  = [ np.abs ( np.sum ( np.exp ( 2.0j * ( pas - ( irm * w2 ) ) ) ) ) for irm in self.rm_grid ]
-        return self.rm_grid [ np.argmax ( ret ) ]
+        ret     = [ np.abs ( np.sum ( np.exp ( 2.0j * ( pas - ( irm * w2 ) ) ) ) ) for irm in self.rm_grid ]
+        rm_stat = self.rm_grid [ np.argmax ( ret ) ]
+        pa_stat = 0.5 * np.angle ( np.sum ( np.exp ( 2.0j * ( pas - ( rm_stat * w2 ) ) ) ) )
+        return rm_stat, pa_stat
 
     def __call__ (self, n_resamples=999, f_trial=0.85, confidence_level=0.95):
         """
@@ -189,7 +191,7 @@ class RMBootstrap:
         """
         ##
         ## ML estimate
-        ml_estimate  = self.statistic ( self.w2, self.pa )
+        rm_ml, pa_ml = self.statistic ( self.w2, self.pa )
 
         nsamples     = self.w2.size
         ntrial       = int ( f_trial * nsamples )
@@ -197,6 +199,7 @@ class RMBootstrap:
         rng          = np.random.default_rng()
 
         re_stat      = np.zeros ( n_resamples, dtype=np.float32 )
+        pe_stat      = np.zeros ( n_resamples, dtype=np.float32 )
 
         for i_resample in tqdm ( range(n_resamples), desc='Bootstrap', unit='bt' ):
             __i    = rng.choice ( nsamples, size=ntrial, replace=True, shuffle=False )
@@ -204,18 +207,21 @@ class RMBootstrap:
             t_w2   = self.w2 [ __i ]
             t_pa   = self.pa [ __i ]
             ##
-            re_stat [i_resample]  = self.statistic ( t_w2, t_pa )
+            re_stat [i_resample], pe_stat[i_resample]  = self.statistic ( t_w2, t_pa )
 
         alpha      = 0.5 * ( 1.0 - confidence_level )
 
-        _ci_low    = np.percentile ( re_stat, alpha * 100. )
-        _ci_high   = np.percentile ( re_stat, (1.0 - alpha) * 100 )
-
         ## basic
-        ci_low     = (2.0*ml_estimate) - _ci_high
-        ci_high    = (2.0*ml_estimate) - _ci_low
+        rm_low     = (2.0*rm_ml) - np.percentile ( re_stat, ( 1.0 - alpha ) * 100.0 )
+        rm_high    = (2.0*rm_ml) - np.percentile ( re_stat, alpha * 100.0 )
 
-        return dict(rm=ml_estimate, rm_low=ci_low, rm_high=ci_high, rm_se=np.std(re_stat, ddof=1))
+        pa_low     = (2.0*pa_ml) - np.percentile ( pe_stat, ( 1.0 - alpha ) * 100.0 )
+        pa_high    = (2.0*pa_ml) - np.percentile ( pe_stat, alpha * 100.0 )
+
+        return dict(
+            rm=rm_ml, rm_low=rm_low, rm_high=rm_high, rm_se=np.std(re_stat, ddof=1),
+            pa=pa_ml, pa_low=pa_low, pa_high=pa_high, pa_se=np.std(pe_stat, ddof=1),
+        ), re_stat, pe_stat
 
 class PASpec:
     """
@@ -266,13 +272,13 @@ class PASpec:
 
         return np.abs ( ret )
 
-    def estimate_rm (self, rms, n_resamples=999, f_trial=0.85, confidence_level=0.95):
+    def bootstrap_rmpa (self, rms, n_resamples=999, f_trial=0.85, confidence_level=0.95):
         """
         estimate RM error using bootstrap
         """
-        boot   = RMBootstrap ( self.w2, self.pa, rms )
-        res    = boot (n_resamples=n_resamples, f_trial=f_trial, confidence_level=confidence_level)
-        return res
+        boot   = RMPABootstrap ( self.w2, self.pa, rms )
+        res, rm_boot, pa_boot    = boot (n_resamples=n_resamples, f_trial=f_trial, confidence_level=confidence_level)
+        return res, rm_boot, pa_boot
 
     def pa_noise (self, rm_estimate, residual_power):
         """
@@ -389,52 +395,47 @@ if __name__ == "__main__":
     rmspec    = paspec.rm_spectrum ( rm_grid ) 
 
     ### fit rm 
-    fitrm     = paspec.estimate_rm ( rm_grid, n_resamples=args.ntrials )
-
-    ### fit pa
-    fitpa     = paspec.estimate_pa0 ( fitrm['rm'] )
+    fitrm, rm_boot, pa_boot   = paspec.bootstrap_rmpa ( rm_grid, n_resamples=args.ntrials )
 
     ### get model
-    model     = paspec.model ( fitrm['rm'], fitpa['pa_mean'] )
-    m_model   = paspec.model ( fitrm['rm'], fitpa['pa_mean'], paspec.mw2 )
+    model     = paspec.model ( fitrm['rm'], fitrm['pa'] )
+    m_model   = paspec.model ( fitrm['rm'], fitrm['pa'], paspec.mw2 )
     # rpa0      = np.arctan ( np.tan ( paspec.pa - model ) )
-    rpa_power, rpa     = paspec.residual_pa ( fitrm['rm'], fitpa['pa_mean'] )
+    rpa_power, rpa     = paspec.residual_pa ( fitrm['rm'], fitrm['pa'] )
 
     ### unbiased PA noise
-    unbiased_paerr   = paspec.pa_noise ( fitrm['rm'], rpa_power )
+    # unbiased_paerr   = paspec.pa_noise ( fitrm['rm'], rpa_power )
 
     ### compute reduced CHI2
-    rchi2     = paspec.chi2_reduced ( fitrm['rm'], fitpa['pa_mean'])
+    rchi2     = paspec.chi2_reduced ( fitrm['rm'], fitrm['pa'])
 
-    ut    = f"RM-ML={fitrm['rm']:.3f}+-{fitrm['rm_se']:.3f}\nPA0={np.rad2deg(fitpa['pa_mean']):.3f}+-{np.rad2deg(fitpa['pa_err']):.3f}\nUnbiased-PA-error={np.rad2deg(unbiased_paerr['unbiased_paerr']):.2e}\nrCHI2={rchi2:.3f}"
+    ut    = f"RM-ML={fitrm['rm']:.3f}+-{fitrm['rm_se']:.3f}\nPA0={np.rad2deg(fitrm['pa']):.3f}+-{np.rad2deg(fitrm['pa_se']):.3f}\nrCHI2={rchi2:.3f}"
 
     if args.v:
         print ( ut )
         print (" done")
 
     RET.update ( fitrm )
-    RET.update ( fitpa )
     RET['w2']     = paspec.w2
     RET['pa']     = paspec.pa
     RET['paerr']  = paspec.paerr
     RET['res_pa'] = rpa
     RET['rmgrid'] = rm_grid
     CET.update ( fitrm )
-    CET.update ( {k:fitpa[k] for k in ['pa_mean','pa_err']})
-    CET.update ( unbiased_paerr )
     ###########################################################
     cf   = pd.DataFrame ( CET, index=[0] )
 
     ###########################################################
     fig = plt.figure ('paspec', figsize=(9,5))
 
-    gs  = mgs.GridSpec ( 3, 2, figure=fig )
+    gs  = mgs.GridSpec ( 3, 3, figure=fig )
 
     axpa = fig.add_subplot ( gs[1,:] )
     axrs = fig.add_subplot ( gs[2,:], sharex=axpa )
-    axgg = fig.add_subplot ( gs[0, 1] )
-    axtt = fig.add_subplot ( gs[0, 0] )
-    axtt.axis('off')
+
+    axgg = fig.add_subplot ( gs[0, 2] )
+    axph = fig.add_subplot ( gs[0, 1] )
+    axrh = fig.add_subplot ( gs[0, 0] )
 
     axpa.errorbar ( paspec.w2, np.rad2deg( paspec.pa ), yerr=np.rad2deg( paspec.paerr ), marker='.', c='k', capsize=5, ls='' )
     axpa.plot ( paspec.mw2, np.rad2deg( m_model ), c='b' )
@@ -447,11 +448,6 @@ if __name__ == "__main__":
     axgg.scatter ( rm_grid, rmspec / rpa_power, marker='.', c='k' )
     # axgg.plot ( rm_grid, rmspec_model / rpa_power, c='b' )
     axgg.axvline ( fitrm['rm'], ls='--', c='b' )
-
-    axgg.xaxis.tick_top ()
-    axgg.xaxis.set_label_position('top')
-    axgg.yaxis.tick_right ()
-    axgg.yaxis.set_label_position('right')
 
     axgg.set_xlabel ('RM / rad m$^{-2}$')
     axgg.set_ylabel ('mag')
@@ -468,7 +464,17 @@ if __name__ == "__main__":
     axpa.set_ylim ( -90., 90. )
     axrs.set_ylim (-30, 30)
 
-    axtt.text ( 0.5, 0.5, ut, ha='center', va='center' )
+    axrh.hist ( rm_boot, bins='auto', density=True, color='blue' )
+    axph.hist ( np.rad2deg(pa_boot), bins='auto', density=True, color='blue' )
+
+    axrh.set_xlabel ('RM')
+    axph.set_xlabel ('PA')
+
+    for _ax in [axgg, axph, axrh]:
+        _ax.xaxis.tick_top ()
+        _ax.xaxis.set_label_position('top')
+        _ax.yaxis.tick_right ()
+        _ax.yaxis.set_label_position('right')
 
     ###########################################################
     # plt.show ()
