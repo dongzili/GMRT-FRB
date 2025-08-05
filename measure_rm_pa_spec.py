@@ -154,6 +154,19 @@ def read_prepare_tscrunch (
     return freq_list, I, Q, U, V, I_err, Q_err, U_err, V_err
 # from skimage.measure import block_reduce
 
+def pa_meanstd ( pas, shiftpa=0.5*np.pi ):
+    """
+    wrap or not
+    """
+    sap  = np.arctan ( np.tan ( pas + shiftpa ) )
+    ##
+    mstd = pas.std ()
+    nstd = sap.std ()
+    if mstd < nstd:
+        return np.mean ( pas ), mstd
+    else:
+        return np.arctan ( np.tan ( np.mean ( sap ) - shiftpa ) ), nstd
+
 class RMPABootstrap:
     """
     bootstrapping RM and PA
@@ -218,9 +231,12 @@ class RMPABootstrap:
         pa_low     = (2.0*pa_ml) - np.percentile ( pe_stat, ( 1.0 - alpha ) * 100.0 )
         pa_high    = (2.0*pa_ml) - np.percentile ( pe_stat, alpha * 100.0 )
 
+        __pa_mean, __pa_std = pa_meanstd ( pe_stat )
+
         return dict(
             rm=rm_ml, rm_low=rm_low, rm_high=rm_high, rm_se=np.std(re_stat, ddof=1),
-            pa=pa_ml, pa_low=pa_low, pa_high=pa_high, pa_se=np.std(pe_stat, ddof=1),
+            pa=pa_ml, pa_low=pa_low, pa_high=pa_high, pa_se=__pa_std,
+            rm_mean=np.mean(re_stat), pa_mean=__pa_mean
         ), re_stat, pe_stat
 
 class PASpec:
@@ -465,10 +481,12 @@ if __name__ == "__main__":
     axrs.set_ylim (-30, 30)
 
     axrh.hist ( rm_boot, bins='auto', density=True, color='blue' )
+    axrh.axvline ( fitrm['rm_mean'], ls=':', c='k', alpha=0.75 )
     axph.hist ( np.rad2deg(pa_boot), bins='auto', density=True, color='blue' )
+    axph.axvline ( np.rad2deg(fitrm['pa_mean']), ls=':', c='k', alpha=0.75 )
 
-    axrh.set_xlabel ('RM')
-    axph.set_xlabel ('PA')
+    axrh.set_xlabel (f"RM = {fitrm['rm_mean']:.3f}")
+    axph.set_xlabel (f"PA = {np.rad2deg(fitrm['pa_mean']):.3f}")
 
     for _ax in [axgg, axph, axrh]:
         _ax.xaxis.tick_top ()
