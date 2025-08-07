@@ -273,6 +273,27 @@ class PASpec:
         self.w2max    = wave2.max()
         self.mw2      = np.linspace ( self.w2min, self.w2max, mpoints, endpoint=True )
 
+    def rmtf  ( self, rms ):
+        """
+        RM transfer function
+        """
+        nrms = rms.size
+
+        ret  = np.zeros ((nrms,), dtype=np.complex64)
+
+        for irm in range ( nrms ):
+            _rm  = rms[irm]
+            ret[irm] = np.sum ( np.exp ( 2.0j * (  _rm * self.w2  ) ) )
+        
+        mag  = np.abs ( ret )
+        pa   = 0.5 * np.angle ( ret )
+
+        wpa  = np.unwrap ( pa, period=np.pi )
+
+        slope, _ = np.polyfit ( rms, wpa, 1 )
+
+        return {'rmtf_mag':mag, 'rmtf_pa':pa, 'rmtf_pa_slope':slope}
+
     def rm_spectrum (self, rms):
         """
         rm spectra?
@@ -288,7 +309,7 @@ class PASpec:
 
         return np.abs ( ret )
 
-    def bootstrap_rmpa (self, rms, n_resamples=999, f_trial=0.85, confidence_level=0.95):
+    def bootstrap_rmpa (self, rms, n_resamples=999, f_trial=0.90, confidence_level=0.95):
         """
         estimate RM error using bootstrap
         """
@@ -410,6 +431,9 @@ if __name__ == "__main__":
     ### compute magnitude spectrum
     rmspec    = paspec.rm_spectrum ( rm_grid ) 
 
+    ### impulse RMTF
+    rmtf      = paspec.rmtf ( rm_grid )
+
     ### fit rm 
     fitrm, rm_boot, pa_boot   = paspec.bootstrap_rmpa ( rm_grid, n_resamples=args.ntrials )
 
@@ -437,7 +461,11 @@ if __name__ == "__main__":
     RET['paerr']  = paspec.paerr
     RET['res_pa'] = rpa
     RET['rmgrid'] = rm_grid
+    RET.update ( rmtf )
     CET.update ( fitrm )
+    CET['rmtf_pa_slope'] = rmtf['rmtf_pa_slope']
+    RET['boot_rm'] = rm_boot
+    RET['boot_pa'] = pa_boot
     ###########################################################
     cf   = pd.DataFrame ( CET, index=[0] )
 
