@@ -17,7 +17,7 @@ def loader (
     ff  = psrchive.Archive_load (fname)
     ff.convert_state ('Stokes')
     ff.remove_baseline ()
-    ff.dedisperse ()
+    # ff.dedisperse ()
     ###
     basis = ff.get_basis()
     nbin  = ff.get_nbin()
@@ -25,7 +25,11 @@ def loader (
     dur   = ff.get_first_Integration().get_duration()
     fcen  = ff.get_centre_frequency ()
     fbw   = ff.get_bandwidth ()
+    freqs = fcen + np.linspace (-0.5 * fbw, 0.5 * fbw, nchan, endpoint=True)
     fchan = fbw / nchan
+    ## 20250812 fcen is already center frequency
+    ## no need to center again
+    # freqs += fchan
     tsamp = dur / nbin
     ###
     data  = ff.get_data ()
@@ -41,13 +45,20 @@ def loader (
     ###
     src          = ff.get_source ()
     bname        = os.path.basename ( fname )
-    ofile        = os.path.join ( odir, bname + ".np_pkl" )
+    ofile        = os.path.join ( odir, bname + ".npz" )
     with open (ofile, 'wb') as f:
-       pkl.dump (dict(
-           data=data, wts=wts, fcen=fcen, fbw=fbw, nchan=nchan,
+       # pkl.dump (dict(
+           # data=data, wts=wts, fcen=fcen, fbw=fbw, nchan=nchan,
+           # mjd=start_time, src=src, duration=dur,
+           # basis=basis
+       # ), f)
+       np.savez (f, **dict(
+           data=data, wts=wts, freqs=freqs,
+           center_freq = fcen,
            mjd=start_time, src=src, duration=dur,
-           basis=basis
-       ), f)
+           basis=basis,
+           bandwidth=fbw,
+       ))
 
 def get_args ():
     import argparse as agp

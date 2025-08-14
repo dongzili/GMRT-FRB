@@ -6,25 +6,26 @@ import os
 import numpy as np
 import pandas as pd
 
-import astroplan as ap
-
 import astropy.time as at
 import astropy.coordinates as asc
 import astropy.units as au
 import astropy.io.fits as aif
 ################################################
 gmrt  = asc.EarthLocation.from_geocentric (1656342.30, 5797947.77, 2073243.16, unit="m")
-observer = ap.Observer (location=gmrt)
 
 R3_sc = asc.SkyCoord ( 29.50312583 * au.degree, 65.71675422 * au.degree, frame='icrs' )
 
-def get_parallactic_angle ( ra, dec, mjd ):
+def get_parallactic_angle ( sc, tobs ):
     """ source coordinates, mjd --> parallactic angle (degree) """
-    atm  = at.Time ( mjd, format='mjd' )
-    atc  = asc.SkyCoord ( ra, dec, unit=(au.hourangle, au.degree)  )
-    print ( atc.ra.hms, atc.dec.dms )
-    pal  = observer.parallactic_angle (atm, atc).to(au.degree).value
-    return pal
+
+    lst   = tobs.sidereal_time ( 'mean', longitude=self.el.lon, model=None )
+    h     = (lst - sc.ra).radian
+    q     = np.arctan2 ( 
+            np.sin ( h ), 
+            np.tan ( gmrt.lat.radian ) * np.cos ( sc.dec.radian ) - 
+            np.sin ( sc.dec.radian ) * np.cos ( h )
+    )
+    return q
 
 def action ( ar ):
     cal           = aif.open ( ar )
@@ -44,9 +45,7 @@ def action ( ar ):
     if args.v:
         print (f" RA/DEC = {ra},{dec}")
     ## get PAL
-    pal_deg   = get_parallactic_angle ( ra, dec, mjd )
-    # print (f" {ar}")
-    # print (f"\tSource={src_name} at MJD={mjd:.6f} parallactic_angle={pal_deg:.2f} deg")
+    pal_deg   = get_parallactic_angle ( asc.SkyCoord ( ra, dec, unit=(au.hourangle, au.degree), frame='icrs' ), at.Time ( mjd, format='mjd') ) * au.radian
     print ( f"{ar},{mjd:.8f},{pal_deg:.4f}" )
 
 ##############################

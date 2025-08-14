@@ -1,6 +1,5 @@
 """
-
-
+max slice
 """
 import os
 import sys
@@ -30,7 +29,7 @@ def block_reduce (x, fac, func=np.mean, cval=0.):
     dx  = x.reshape (rxs).mean (mxs)
     return dx
 
-def read_prepare_tscrunch ( 
+def read_prepare_max ( 
         pkg_file,
         fscrunch,
         v=False
@@ -132,23 +131,23 @@ def read_prepare_tscrunch (
     U  = U_on [ omask ] -  np.mean (U_off [ omask ], 1)[:,np.newaxis]
     V  = V_on [ omask ] -  np.mean (V_off [ omask ], 1)[:,np.newaxis]
 
-    ## sum over time
-    I      = I.sum (1)
-    Q      = Q.sum (1)
-    U      = U.sum (1)
-    V      = V.sum (1)
-
-    nON       = np.sqrt ( ons.stop - ons.start )
-    if v:
-        print (" Number of ON samples = {on:d}".format(on=ons.stop - ons.start))
+    ## max over time
+    ## pick max
+    pp     = I.mean (0)
+    imax   = np.argmax ( pp )
+    I      = I[...,imax]
+    Q      = Q[...,imax]
+    U      = U[...,imax]
+    V      = V[...,imax]
 
     # 20230313 : use whole pulse region to compute the standard deviation
     # 20230313 : and multiply with sqrt ( width )
+    # 20250808 : only one slice so no scaling the error
 
-    I_err     = nON * I_std [ omask ]
-    Q_err     = nON * Q_std [ omask ]
-    U_err     = nON * U_std [ omask ]
-    V_err     = nON * V_std [ omask ]
+    I_err     = I_std [ omask ]
+    Q_err     = Q_std [ omask ]
+    U_err     = U_std [ omask ]
+    V_err     = V_std [ omask ]
     freq_list = freq_list [ omask ]
 
     return freq_list, I, Q, U, V, I_err, Q_err, U_err, V_err
@@ -416,7 +415,7 @@ if __name__ == "__main__":
         print (f" RM Grid = {args.rmlow:.3f} ... {args.rmhigh:.3f} with {args.rmgrid:d} steps")
     rm_grid   = np.linspace ( args.rmlow, args.rmhigh, args.rmgrid , endpoint=True )
     ####################################
-    freq_list, I, Q, U, V, I_err, Q_err, U_err, V_err = read_prepare_tscrunch (
+    freq_list, I, Q, U, V, I_err, Q_err, U_err, V_err = read_prepare_max (
         args.pkg,
         args.fs,
         args.v
@@ -543,5 +542,6 @@ if __name__ == "__main__":
     fig.savefig ( os.path.join ( args.odir, bn + ".png" ), dpi=300, bbox_inches='tight' )
     cf.to_csv ( os.path.join ( args.odir, bn + "_spec.csv" ), index=False )
     np.savez ( os.path.join ( args.odir, bn + "_spec.npz"), **RET)
+
 
 
